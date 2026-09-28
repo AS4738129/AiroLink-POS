@@ -113,25 +113,21 @@ Only introduce a new abstraction when it is genuinely necessary.
 
 # 6. DEVELOPMENT PHASES
 
-The project is being developed in phases.
+The project follows a six-phase master architecture. Current status:
 
-Current status:
+Phase 1 - SaaS Foundation: IMPLEMENTED and verified.
 
-Phase 1 - Foundation: COMPLETED
+Phase 2 - Products and Branch-Aware Inventory: IMPLEMENTED and verified.
+
+Phase 3 - POS, Sales, Payments, Receipts: IMPLEMENTED, pending your review.
 
 Next:
-
-Phase 2 - Products and Inventory
-
-Future phases:
-
-Phase 3 - POS and Sales
 
 Phase 4 - Customers, Suppliers and Purchases
 
 Phase 5 - Reports, Expenses and Profit
 
-Phase 6 - Security, Testing and Production
+Phase 6 - Users/Roles, Audit, Security Hardening, Testing, Production
 
 Stay within the currently requested phase.
 
@@ -141,35 +137,63 @@ Do not implement future-phase features unless explicitly requested.
 
 # 7. CURRENT PHASE
 
-## Phase 2 — Products and Inventory
+## Phase 3 — POS, Sales, Payments, Receipts (implemented)
 
-The immediate development scope includes:
+- `complete_sale()` stays the single atomic checkout (server-authoritative price/tax/total, entitlement, branch authorization, atomic branch stock deduction, credit rules); the browser sends only product ids + quantities
+- Split payments (cash/momo/card/bank/other), cash change shown in the POS but never stored as a payment
+- Sales/sale_items/payments reads are branch-aware; branch list is limited to accessible branches (`branch_visible()`)
+- `void_sale()` (owner/manager/super_admin): status `void`, stock restored via `return`, credit reversed, audited; payments untouched
+- Frontend: rebuilt `Pos.tsx` (visible branch, cart with editable qty/remove, split payments, double-submit guard, receipt on success), `Receipt.tsx`/`ReceiptDialog.tsx` (printable, reprint reads the stored sale), `Sales.tsx` (history, filters, detail, void), pure `lib/cart.ts` and `lib/payments.ts`
+- Query cache: keys are `[root, orgId, …]`; `ContextCacheSync` + `lib/queryScope.ts` remove/invalidate cache on user/org/branch change; `AuthProvider` exposes org context atomically (`lib/orgContext.ts`). New queries MUST follow the key convention and be classified in `queryScope.ts` (a test enforces it)
+- Deferred: refunds/partial returns and physical cash refunds, stored cash-change on reprints, customer/supplier management (Phase 4), reports (Phase 5), branch-membership admin UI (Phase 6)
 
-- product CRUD
-- categories
-- SKU management
-- barcode management
-- product search
-- cost price
-- selling price
-- product status
-- product images
-- inventory page
-- stock quantity
-- low-stock detection
-- opening stock
-- inventory adjustments
-- stock count
-- inventory history
-- inventory transaction ledger
-- inventory permissions
-- RLS
-- secure inventory operations
-- audit logging
-- appropriate database indexes
-- tests
 
-Do not implement the complete Phase 3 POS workflow unless explicitly instructed.
+## Phase 2 — Products and Branch-Aware Inventory (implemented)
+
+What Phase 2 added on top of Phase 1:
+
+- Products stayed organization-scoped (identity/SKU/barcode/pricing/category);
+  stock moved to a new `branch_inventory` table, one row per
+  (org, branch, product), replacing the old organization-wide
+  `products.stock_qty`/`min_stock`
+- `inventory_transactions` and `sales` both gained a `branch_id`, with
+  composite foreign keys to `branches(id,org_id)`/`products(id,org_id)` so a
+  record can never combine a branch/product from one organization with
+  another organization's data
+- `apply_inventory()` now upserts `branch_inventory`; a `guard_branch_inventory()`
+  trigger blocks direct client writes to `stock_qty`, same as the old guard did
+- `can_access_branch(branch_id)` — backward-compatible branch authorization:
+  a user with no `branch_members` rows in an org can access every branch of
+  that org (today's default); a user with explicit `branch_members` rows is
+  scoped to just those branches
+- `complete_sale()` now requires `p_branch`, validates it, and deducts stock
+  from that branch only — the old 5-argument version was dropped, not left
+  running alongside the new one
+- Frontend: full product CRUD + category management in `Products.tsx`; a new
+  `Inventory.tsx` (branch selector, stock table with low/out status, stock
+  adjustment workflow for opening/adjustment/damaged/expired/count, and
+  transaction history); `Pos.tsx` updated to look up branch-scoped stock and
+  pass the current branch to `complete_sale()`
+
+Not yet done, and intentionally deferred to later phases:
+
+- Sales/sale_items/payments visibility is still organization-wide (not
+  branch-restricted) — Phase 3/5 concern, not required for Phase 2
+- No branch-membership admin UI (Phase 6) — the `branch_members` data model
+  is exercised by tests but only editable via direct table access today
+- No branch-specific pricing (explicitly out of scope for Phase 2)
+
+## (Superseded) Phase 3 scope list
+
+The immediate development scope, once Phase 2 is confirmed, includes:
+
+- refunds/void workflow
+- printable receipts
+- sale history and sale detail views
+- duplicate-submission protection review
+- any further payment-method handling
+
+Do not implement Phase 4/5/6 features unless explicitly instructed.
 
 ---
 
@@ -482,10 +506,14 @@ Database schema changes must use migrations.
 Existing migration:
 
 `supabase/migrations/0001_core.sql`
+`supabase/migrations/0002_phase1_foundation.sql`
+`supabase/migrations/0003_phase2_products_inventory.sql`
+`supabase/migrations/0004_phase3_pos_sales.sql`
+`supabase/migrations/0005_restrict_helper_execute.sql`
 
 New changes should use a new migration, for example:
 
-`supabase/migrations/0002_inventory.sql`
+`supabase/migrations/0006_customers_suppliers.sql`
 
 Do not casually edit an already-applied production migration.
 
@@ -511,8 +539,11 @@ Prefer safe forward migrations.
 
 Existing important functions include:
 
-- `create_organization()`
-- `complete_sale()`
+- `create_organization()` — also provisions a default branch and trial subscription
+- `complete_sale(p_org, p_branch, ...)` — gated by `is_org_entitled()` and `can_access_branch()`; deducts stock from the given branch's `branch_inventory` row
+- `is_org_entitled()` — the entitlement check every protected commercial RPC should use
+- `can_access_branch()` — the branch-authorization check every branch-scoped RPC/RLS policy should use
+- `void_sale()` — safe cancellation of a completed sale (no deletion)
 
 Do not duplicate existing business logic unnecessarily.
 

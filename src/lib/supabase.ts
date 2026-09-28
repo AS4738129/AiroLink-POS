@@ -9,6 +9,9 @@ export const friendly = (e: unknown) => {
   if (/fetch|network/i.test(m)) return 'Cannot reach the server. Check your internet connection and try again.'
   if (/row-level security|permission denied|Not authorized/i.test(m)) return 'You do not have permission to do that.'
   if (/duplicate key/i.test(m)) return 'That SKU or barcode already exists.'
+  if (/Subscription is not active/i.test(m)) return 'This business is not currently entitled to use POS. Please renew the subscription.'
+  if (/No access to this branch|Invalid branch/i.test(m)) return 'Your branch access has changed. Please select an authorized branch.'
+  if (/Only a completed sale|Sale not found/i.test(m)) return m
   if (/Insufficient stock|Credit limit|Cart is empty|Payments exceed|Choose a customer|Product unavailable|Discount exceeds|Invalid/.test(m)) return m
   return 'Something went wrong. Please try again.'
 }

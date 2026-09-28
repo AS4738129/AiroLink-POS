@@ -1,1 +1,10 @@
 @import "tailwindcss"; body{font-family:system-ui,sans-serif;background:#f6f7f9;color:#111827}
+
+/* Printing: only the receipt is printed; suits A4 and (narrow max-w) thermal paper. */
+@media print {
+  body { background: #fff }
+  body * { visibility: hidden }
+  .receipt, .receipt * { visibility: visible }
+  .receipt { position: absolute; left: 0; top: 0; max-width: 80mm; padding: 0 }
+  .no-print { display: none !important }
+}

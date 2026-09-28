@@ -21,21 +21,29 @@ The system must be a real application connected to a real PostgreSQL database th
 
 ## Current Development Status
 
-Current Phase: Phase 1 - Foundation
+Current Phase: Phase 3 - POS, Sales, Payments, Receipts (implemented)
 
-Phase 1 status: COMPLETED
+Phase 1 status: IMPLEMENTED and verified (branches, subscriptions, entitlement).
+Phase 2 status: IMPLEMENTED — products stayed organization-scoped; stock moved
+to a new branch_inventory table so the same product can carry different stock
+per branch. See ARCHITECTURE.md §5.3.
 
-Phase 1 checkpoint:
+Checkpoint:
 - Application runs locally with Vite.
 - Supabase authentication is configured.
-- Supabase database schema has been applied.
-- Organization onboarding works.
-- User can create their business organization.
-- Role-based permissions foundation exists.
-- Products and POS routes exist.
+- Supabase database schema has been applied (0001_core.sql + 0002_phase1_foundation.sql + 0003_phase2_products_inventory.sql).
+- Organization onboarding works, and provisions a default branch and a 14-day trial subscription.
+- A user can belong to more than one organization; the frontend loads every membership rather than assuming one.
+- Subscription/entitlement is enforced server-side in complete_sale(); the frontend also reflects it via a banner and disabling POS.
+- Product CRUD, category management, search/filter/sort all work (Products page).
+- Branch-scoped inventory works: stock, minimum stock, opening/adjustment/damaged/expired/count workflows, and history (Inventory page).
+- complete_sale() now takes an explicit branch and deducts stock from that branch only.
+- Client cache is isolated per user/organization/branch (see ARCHITECTURE.md §5.5).
+- POS checkout is branch-aware and atomic, with split payments, cash change display, printable receipts, reprint, sales history with filters, and void.
+- Sales/sale_items/payments visibility is branch-aware.
 - Git repository is initialized.
 - Main branch is pushed to GitHub.
-- Working tree is currently clean.
+- Working tree currently has the Phase 1-3 changes pending commit (see CHANGELOG.md).
 
 Git branch:
 main
@@ -98,33 +106,46 @@ The Supabase `service_role` key must NEVER be placed in frontend environment var
 Primary database:
 Supabase PostgreSQL
 
-Current migration:
+Current migrations:
 
 `supabase/migrations/0001_core.sql`
+`supabase/migrations/0002_phase1_foundation.sql`
+`supabase/migrations/0003_phase2_products_inventory.sql`
+`supabase/migrations/0004_phase3_pos_sales.sql`
+`supabase/migrations/0005_restrict_helper_execute.sql`
 
-The migration contains the core application schema, including:
+The migrations contain the core application schema, including:
 
 - organizations
 - profiles
 - organization_members
+- branches
+- branch_members
+- plans
+- subscriptions
 - categories
-- products
+- products (organization-scoped identity/pricing; no stock columns since 0003)
+- branch_inventory (branch-scoped stock/min_stock)
 - customers
 - customer_transactions
 - org_counters
-- sales
+- sales (branch-scoped since 0003)
 - sale_items
 - payments
-- inventory_transactions
+- inventory_transactions (branch-scoped since 0003)
 - audit_logs
 
 It also contains security/helper functions including:
 
 - role_in()
 - can()
+- can_access_branch()
 - touch()
 - create_organization()
 - complete_sale()
+- void_sale()
+- is_org_entitled()
+- branch_visible()
 
 The database uses UUIDs and PostgreSQL functions for important transactional operations.
 
@@ -134,11 +155,13 @@ The database uses UUIDs and PostgreSQL functions for important transactional ope
 
 AiroLink POS is intended to support multiple businesses.
 
-Each business is represented by an organization.
+Each business is represented by an organization, which has one or more branches and exactly one subscription record.
 
 Users belong to organizations through:
 
 `organization_members`
+
+A user may belong to more than one organization, each with its own role — the frontend must load every membership rather than assuming a single one.
 
 The organization membership contains the user's application role.
 
@@ -151,6 +174,16 @@ A user belonging to Organization A must never be able to read or modify Organiza
 RLS must enforce this at the database level.
 
 Frontend permission checks are useful for UI behavior but are NOT considered sufficient security.
+
+---
+
+## Subscription / Entitlement
+
+Creating an account or an organization does not grant unrestricted commercial access.
+
+`create_organization()` provisions a 14-day `trialing` subscription automatically. Every protected commercial operation (currently `complete_sale()`) calls `is_org_entitled(org_id)` and refuses to proceed if the organization's subscription is not `trialing`/`active` and inside its window.
+
+Clients cannot write to `subscriptions` or `plans` directly — there is no INSERT/UPDATE/DELETE RLS policy for either table. Subscription state changes only through a future billing RPC or the service role.
 
 ---
 
@@ -251,9 +284,9 @@ The application is still in the foundation stage and is not yet a complete POS p
 
 ## Phase Roadmap
 
-### Phase 1 - Foundation
+### Phase 1 - SaaS Foundation
 
-Status: COMPLETED
+Status: IMPLEMENTED (re-baselined)
 
 Includes:
 
@@ -261,7 +294,9 @@ Includes:
 - authentication
 - Supabase integration
 - core database schema
-- organizations
+- organizations (multi-organization membership, not a single-org assumption)
+- branches (with a default main branch per org, and a branch-membership foundation table)
+- subscription/entitlement foundation (plans, subscriptions, is_org_entitled())
 - users
 - roles
 - RLS foundation
@@ -272,40 +307,38 @@ Includes:
 
 ---
 
-### Phase 2 - Products and Inventory
+### Phase 2 - Products and Branch-Aware Inventory
 
-Status: NEXT
+Status: IMPLEMENTED
 
-Planned features:
+Delivered:
 
-- product CRUD
-- categories
-- product search
-- SKU management
-- barcode support
-- product pricing
-- product cost
-- product images
-- inventory page
-- stock levels
-- low-stock alerts
-- opening stock
-- inventory adjustments
-- stock count
-- inventory history
-- inventory transaction ledger
-- role-based inventory permissions
-- audit logging
-- secure database operations
-- inventory RLS
-- appropriate database indexes
-- tests
+- product CRUD, categories (create/rename/safe delete), product search/filter/sort
+- SKU/barcode uniqueness (organization-scoped, unchanged from Phase 1)
+- product pricing, cost, taxable status, images (existing image_url field)
+- branch_inventory: stock moved from organization-wide to branch-scoped
+  (unique(org_id,branch_id,product_id), composite FKs to branches/products)
+- inventory page with a branch selector, low/out-of-stock status, and a
+  min_stock editable per branch
+- opening/adjustment/damaged/expired/count workflows, all via inventory_transactions
+- inventory history (branch-filtered)
+- role-based inventory permissions (`inventory`/`adjustInventory` in permissions.ts)
+- audit logging (unchanged: sale.create/product.create/org.create)
+- can_access_branch() + branch-aware RLS on branch_inventory/inventory_transactions
+- appropriate composite indexes/constraints
+- expanded db.test.mjs (41 assertions covering Phase 1 + Phase 2)
 
 Do NOT implement Phase 3 features unless explicitly requested.
 
 ---
 
-### Phase 3 - POS and Sales
+### Phase 3 - POS, Sales, Payments, Receipts
+
+Status: IMPLEMENTED
+
+Delivered: branch-aware atomic checkout (existing `complete_sale()`), server-authoritative pricing/tax, split payments and credit sales, printable receipts and reprint, sales history/detail with filters, `void_sale()`, branch-aware sales/sale_items/payments RLS, DB and frontend tests. Deferred: refunds/partial returns and manual cash-refund handling.
+
+(Original planned scope, kept for reference:)
 
 Planned:
 
