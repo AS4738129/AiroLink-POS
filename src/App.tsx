@@ -14,7 +14,7 @@ export default function App() {
 }
 
 function AppShell() {
-  const { session, org, branch, orgs, switchOrg, subscription, entitled, contextLoading, loading } = useAuth()
+  const { session, org, branch, orgs, switchOrg, subscription, entitled, contextLoading, contextError, loading, reload } = useAuth()
   if (loading) return <p className="p-8">Loading…</p>
   if (!session) return <Login />
   if (!org) return <Onboarding />
@@ -46,7 +46,13 @@ function AppShell() {
         </div>
       )}
       <main className="mx-auto max-w-6xl p-4">
-        {contextLoading ? <p>Loading business…</p> : <Routes key={org.id}>
+        {contextLoading ? <p>Loading business…</p> : contextError ? (
+          <div role="alert" className="rounded-lg bg-red-50 p-4 text-sm text-red-800">
+            <p className="font-medium">Could not load this business's branches/subscription.</p>
+            <p className="mt-1 font-mono text-xs">{contextError}</p>
+            <button onClick={() => void reload()} className="mt-2 rounded-lg border border-red-300 bg-white px-3 py-1.5">Retry</button>
+          </div>
+        ) : <Routes key={org.id}>
           <Route path="/pos" element={posAllowed ? <Pos key={branch?.id ?? 'none'} /> : <Navigate to="/products" />} />
           <Route path="/products" element={<Products />} />
           <Route path="/inventory" element={inventoryAllowed ? <Inventory key={branch?.id ?? 'none'} /> : <Navigate to="/products" />} />

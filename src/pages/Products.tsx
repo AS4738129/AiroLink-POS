@@ -7,7 +7,6 @@ import { allowed } from '../lib/permissions'
 
 const PAGE = 20
 const schema = z.object({
-  sku: z.string().trim().min(1, 'SKU is required'),
   name: z.string().trim().min(1, 'Name is required'),
   barcode: z.string().trim().optional(),
   category_id: z.string().trim().optional(),
@@ -67,10 +66,11 @@ export default function Products() {
   const save = useMutation({
     mutationFn: async (v: FormValues) => {
       const payload = {
-        org_id: org!.id, sku: v.sku, name: v.name, barcode: v.barcode || null, category_id: v.category_id || null,
+        org_id: org!.id, name: v.name, barcode: v.barcode || null, category_id: v.category_id || null,
         brand: v.brand || null, unit: v.unit || 'pcs', description: v.description || null,
         cost_price: v.cost_price, selling_price: v.selling_price, taxable: v.taxable ?? true,
       }
+      // sku is never sent: the database generates it on insert and it never changes on update (see 0006_auto_sku.sql).
       if (editing) { const { error } = await supabase.from('products').update(payload).eq('id', editing.id); if (error) throw error }
       else { const { error } = await supabase.from('products').insert(payload); if (error) throw error }
     },
@@ -118,7 +118,8 @@ export default function Products() {
 
       {canEdit && <form key={editing?.id ?? 'new'} onSubmit={submit} className="grid gap-3 rounded-xl border bg-white p-4 sm:grid-cols-3">
         <p className="col-span-full text-sm font-medium">{editing ? `Editing ${editing.name}` : 'Add a product'}</p>
-        {field('sku', 'SKU')}{field('name', 'Name')}{field('barcode', 'Barcode (optional)')}
+        {field('name', 'Name')}{field('barcode', 'Barcode (optional)')}
+        {editing && <p className="block text-sm text-gray-600">SKU<br /><span className="font-mono">{editing.sku}</span> <span className="text-xs">(assigned automatically, cannot be changed)</span></p>}
         <label className="block text-sm">Category<select name="category_id" defaultValue={editing?.category_id ?? ''} className={inp}>
           <option value="">Uncategorized</option>{categories.data?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select></label>

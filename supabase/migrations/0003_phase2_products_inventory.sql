@@ -9,6 +9,25 @@
 --   than a trigger) are used to make cross-tenant branch/product combinations
 --   structurally impossible.
 
+-- ── Upgrade safety: organizations that already existed before branches/subscriptions ──
+-- 0002 created `branches` and `subscriptions`, but a database that already had organizations (created
+-- under Phase 1) has neither a main branch nor a subscription row for them. Everything below assumes
+-- every organization has exactly one main branch (stock, ledger and sales are moved onto it), and the
+-- app treats a missing subscription as "not entitled" (POS locked), so both are created here.
+-- Idempotent: organizations that already have them (everything created by create_organization()) are untouched.
+-- (This lives in 0003, not 0002, so it also protects databases where 0002 was already applied.)
+update branches b set is_main = true
+ where b.id = (select b2.id from branches b2 where b2.org_id = b.org_id order by b2.created_at, b2.id limit 1)
+   and not exists (select 1 from branches m where m.org_id = b.org_id and m.is_main);
+insert into branches(org_id, name, is_main)
+select o.id, 'Main Branch', true from organizations o
+ where not exists (select 1 from branches b where b.org_id = o.id);
+-- Existing organizations get the standard 14-day trial starting now, so an upgrade never locks a business out of POS.
+insert into subscriptions(org_id, plan_id, status, trial_starts_at, trial_ends_at, current_period_start, current_period_end)
+select o.id, (select id from plans where code = 'trial'), 'trialing', now(), now() + interval '14 days', now(), now() + interval '14 days'
+  from organizations o
+ where not exists (select 1 from subscriptions s where s.org_id = o.id);
+
 -- ── Composite keys needed for tenant-safe composite foreign keys ──────────
 alter table branches add constraint branches_id_org_uniq unique (id, org_id);
 alter table products add constraint products_id_org_uniq unique (id, org_id);

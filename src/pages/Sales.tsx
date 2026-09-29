@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase, friendly } from '../lib/supabase'
+import { errorDetail } from '../lib/errors'
 import { useAuth } from '../features/auth/AuthProvider'
 import { allowed } from '../lib/permissions'
 import { METHODS } from '../lib/payments'
@@ -63,7 +64,7 @@ export default function Sales() {
         <thead className="bg-gray-50"><tr>{['Receipt #', 'Date', 'Branch', 'Cashier', 'Customer', 'Total', 'Payment', ''].map((h) => <th key={h} className="p-3">{h}</th>)}</tr></thead>
         <tbody>
           {list.isLoading && <tr><td className="p-4" colSpan={8}>Loading…</td></tr>}
-          {list.isError && <tr><td className="p-4 text-red-700" colSpan={8}>Could not load sales. <button className="underline" onClick={() => list.refetch()}>Retry</button></td></tr>}
+          {list.isError && <tr><td className="p-4 text-red-700" colSpan={8}>Could not load sales.<br /><span className="font-mono text-xs">{errorDetail(list.error)}</span> <button className="underline" onClick={() => list.refetch()}>Retry</button></td></tr>}
           {list.data?.rows.length === 0 && <tr><td className="p-4 text-gray-600" colSpan={8}>No sales match.</td></tr>}
           {list.data?.rows.map((r) => <tr key={r.id} className={`border-t ${r.status === 'void' ? 'text-gray-500' : ''}`}>
             <td className="p-3 font-mono">{r.receipt_no}</td><td className="p-3">{new Date(r.created_at).toLocaleString()}</td><td className="p-3">{branchName(r.branch_id)}</td>

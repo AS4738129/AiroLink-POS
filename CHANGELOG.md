@@ -4,6 +4,28 @@ All notable project development milestones are recorded here.
 
 ---
 
+# 2026-09-29 (Phase 3 hardening: bug fixes + automatic SKU)
+
+## POS/Sales runtime bug fixes
+
+**Root cause (both bugs):** an organization created before migrations `0002`/`0003` existed had no main branch and no subscription row. Migration `0003_phase2_products_inventory.sql` backfills a main branch's stock/ledger and, before the point where it makes `sales.branch_id`/`inventory_transactions.branch_id` `NOT NULL`, assumed a main branch already existed — for such a pre-existing organization it did not, so those `NOT NULL` steps failed, aborting `0003` entirely (so `0004`/`0005` never applied either, leaving `sales`/`branch_inventory` in a shape the frontend's queries don't match). Separately, an organization left without a subscription row is permanently "not entitled", so `posAllowed` is false and the POS route immediately redirects to Products.
+
+**Fix (modifies the already-committed `0003_phase2_products_inventory.sql`, not a new migration):** an idempotent backfill was added at the top of `0003` that gives every organization missing one a main branch and a 14-day trial subscription, *before* the branch-stock/ledger backfill and the `NOT NULL` steps run. For any database where `0003` already succeeded (main branch already present on every org, e.g. anything created through `create_organization()`), every `INSERT ... WHERE NOT EXISTS` here is a no-op — this is a pure bug fix with no effect on an already-correct database. I edited a historical migration only because it was genuinely broken for this real upgrade path (the project's own git history shows a pre-Phase-2 commit, `4db2a28`, so this is not a hypothetical case); the fix is documented in the migration file itself, and a new regression test (`supabase/tests/db.test.mjs`) reproduces the exact original bug — a fresh Phase-1-only database with an org/product/sale, migrated forward — and asserts both symptoms are gone and checkout still works.
+
+**Also added:** `orgContext`/`AuthProvider` now carry a real load error for the branches/subscription query (`lib/errors.ts`), and `App.tsx`, `Pos.tsx`, `Sales.tsx` show that technical detail (with a working Retry) instead of a generic message, so a genuine future schema/RLS problem is visible rather than silently indistinguishable from "not entitled".
+
+**Deployment note:** this only takes effect once the corrected migration actually runs against a given database. Since the original `0003` aborted (and Postgres/Supabase migrations that error are not marked as applied), re-running the pending migrations (`0003` onward) with this fix applies it automatically; a database that never hit this bug is unaffected.
+
+## Automatic SKU generation
+New migration `0006_auto_sku.sql`: a `BEFORE INSERT` trigger on `products` fills in `sku` (format `PRD-000001`, `PRD-000002`, …) whenever the caller leaves it null/blank, using the existing `org_counters` table — the same atomic `INSERT ... ON CONFLICT (org_id, name) DO UPDATE ... RETURNING` pattern already used for receipt numbers, so it is organization-scoped and concurrency-safe without a new sequence object. It never fires on UPDATE, so editing a product can never change its SKU, and a product that already has a SKU (explicitly supplied, or from before this migration) is left exactly as-is. `Products.tsx` no longer has a SKU input field; the generated SKU is shown read-only when editing. The existing `unique(org_id, sku)` constraint (from `0001`) continues to reject duplicates.
+
+## Tests
+`db.test.mjs`: 124 assertions (was 106) — 10 new SKU tests (generation, format, sequencing, org isolation, stability under edit, duplicate rejection, cross-org protection) and 6 regression tests that reproduce the upgrade bug against a second, independently-migrated in-memory database. Vitest: 61 tests (was 59) — 2 new tests for `orgContext` error surfacing.
+
+Verification: `npm run test:db` → 124/124 PASS · `npx vitest run` → 8 files, 61/61 · `npx tsc --noEmit` → clean · `npm run build` → succeeds.
+
+---
+
 # 2026-09-28 (recovery + hardening)
 
 ## Phases 1–3 recovered into the repository and verified as one system

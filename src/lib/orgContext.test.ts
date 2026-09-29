@@ -1,16 +1,22 @@
 import { describe, it, expect } from 'vitest'
 import { chooseBranch, deriveOrgContext, selectBranch, type OrgContext } from './orgContext'
 type B = { id: string; isMain: boolean }
-const ctxA: OrgContext<B, string> = { orgId: 'A', branches: [{ id: 'a1', isMain: true }, { id: 'a2', isMain: false }], currentBranchId: 'a2', subscription: 'A-active' }
+const ctxA: OrgContext<B, string> = { orgId: 'A', branches: [{ id: 'a1', isMain: true }, { id: 'a2', isMain: false }], currentBranchId: 'a2', subscription: 'A-active', error: null }
 describe('deriveOrgContext', () => {
   it('exposes the loaded context for the matching organization', () => {
     expect(deriveOrgContext(ctxA, 'A')).toMatchObject({ currentBranchId: 'a2', subscription: 'A-active', contextLoading: false })
   })
   it('after switching A → B, never exposes A\'s branch, branches or subscription; reports loading', () => {
     const d = deriveOrgContext(ctxA, 'B')
-    expect(d).toEqual({ branches: [], subscription: null, currentBranchId: null, contextLoading: true })
+    expect(d).toEqual({ branches: [], subscription: null, currentBranchId: null, error: null, contextLoading: true })
   })
   it('is not "loading" when no organization is selected', () => expect(deriveOrgContext(ctxA, null).contextLoading).toBe(false))
+})
+describe('load errors are surfaced, not swallowed', () => {
+  it('exposes the error of the loaded context so the app can show it', () => {
+    expect(deriveOrgContext({ ...ctxA, error: 'relation "branches" does not exist' }, 'A').error).toBe('relation "branches" does not exist')
+  })
+  it('never carries one organization\'s error into another', () => expect(deriveOrgContext({ ...ctxA, error: 'boom' }, 'B').error).toBeNull())
 })
 describe('branch selection', () => {
   it('chooses the remembered branch only if the database returned it, else main, else first', () => {

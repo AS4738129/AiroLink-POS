@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from '../../lib/supabase'
+import { errorDetail } from '../../lib/errors'
 import type { Role } from '../../lib/permissions'
 import { chooseBranch, deriveOrgContext, selectBranch, type OrgContext as GenericOrgContext } from '../../lib/orgContext'
 
@@ -27,16 +28,18 @@ type Ctx = {
   // True while an organization is selected but its branches/subscription have not loaded yet
   // (never expose the previous organization's branch or subscription in that window).
   contextLoading: boolean
+  // Set when the organization's branches/subscription could not be read (e.g. database migrations not fully applied).
+  contextError: string | null
   loading: boolean
   reload: () => Promise<void>
 }
 
-const C = createContext<Ctx>({
+export const AuthContext = createContext<Ctx>({
   session: null, org: null, orgs: [], switchOrg: () => {},
   branch: null, branches: [], switchBranch: () => {},
-  subscription: null, entitled: false, contextLoading: false, loading: true, reload: async () => {},
+  subscription: null, entitled: false, contextLoading: false, contextError: null, loading: true, reload: async () => {},
 })
-export const useAuth = () => useContext(C)
+export const useAuth = () => useContext(AuthContext)
 
 const CURRENT_ORG_KEY = 'airolink.currentOrgId'
 const CURRENT_BRANCH_KEY = 'airolink.currentBranchId'
@@ -82,7 +85,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loadOrgContext = async (orgId: string | null) => {
     const req = ++ctxReq.current
     if (!orgId) { setCtx(null); return }
-    const [{ data: branchRows }, { data: subRow }] = await Promise.all([
+    const [{ data: branchRows, error: branchErr }, { data: subRow, error: subErr }] = await Promise.all([
       supabase.from('branches').select('id,name,is_main').eq('org_id', orgId).eq('is_active', true).order('name'),
       supabase.from('subscriptions').select('status,trial_ends_at,current_period_end').eq('org_id', orgId).maybeSingle(),
     ])
@@ -90,11 +93,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const list = (branchRows ?? []).map((b) => ({ id: b.id as string, name: b.name as string, isMain: b.is_main as boolean }))
     const savedBranch = localStorage.getItem(CURRENT_BRANCH_KEY)  // UI preference only; the list above is what the database allows
     const nextBranch = chooseBranch(list, savedBranch)
-    setCtx({ orgId, branches: list, currentBranchId: nextBranch,
+    const loadError = branchErr || subErr
+    if (loadError) console.error('Could not load organization context', loadError)
+    setCtx({ orgId, branches: list, currentBranchId: nextBranch, error: loadError ? errorDetail(loadError) : null,
       subscription: subRow ? { status: subRow.status as SubscriptionStatus, trialEndsAt: subRow.trial_ends_at, currentPeriodEnd: subRow.current_period_end } : null })
   }
 
-  const reload = async () => { await loadOrgs(session) }
+  const reload = async () => { await loadOrgs(session); await loadOrgContext(currentOrgId) }
 
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data }) => { setSession(data.session); await loadOrgs(data.session); setLoading(false) })
@@ -111,14 +116,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setCtx((c) => { const n = selectBranch(c, currentOrgId, branchId); if (n !== c) localStorage.setItem(CURRENT_BRANCH_KEY, branchId); return n })
   }
 
-  const { branches, subscription, currentBranchId, contextLoading } = deriveOrgContext(ctx, currentOrgId)
+  const { branches, subscription, currentBranchId, contextLoading, error: contextError } = deriveOrgContext(ctx, currentOrgId)
   const org = useMemo(() => orgs.find((o) => o.id === currentOrgId) ?? null, [orgs, currentOrgId])
   const branch = useMemo(() => branches.find((b) => b.id === currentBranchId) ?? null, [branches, currentBranchId])
   const entitled = useMemo(() => isEntitled(subscription), [subscription])
 
   return (
-    <C.Provider value={{ session, org, orgs, switchOrg, branch, branches, switchBranch, subscription, entitled, contextLoading, loading, reload }}>
+    <AuthContext.Provider value={{ session, org, orgs, switchOrg, branch, branches, switchBranch, subscription, entitled, contextLoading, contextError, loading, reload }}>
       {children}
-    </C.Provider>
+    </AuthContext.Provider>
   )
 }

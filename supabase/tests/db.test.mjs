@@ -6,7 +6,7 @@ await db.exec(`create schema auth; create table auth.users(id uuid primary key d
 create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.sub',true),'')::uuid $$;
 create role anon; create role authenticated; grant usage on schema public, auth to anon, authenticated;`)
 
-for (const file of ['0001_core.sql', '0002_phase1_foundation.sql', '0003_phase2_products_inventory.sql', '0004_phase3_pos_sales.sql', '0005_restrict_helper_execute.sql']) {
+for (const file of ['0001_core.sql', '0002_phase1_foundation.sql', '0003_phase2_products_inventory.sql', '0004_phase3_pos_sales.sql', '0005_restrict_helper_execute.sql', '0006_auto_sku.sql']) {
   let sql = readFileSync(new URL(`../migrations/${file}`, import.meta.url), 'utf8')
   if (file === '0001_core.sql') sql = sql.replace('create extension if not exists pgcrypto;', '')
   await db.exec(sql)
@@ -251,6 +251,62 @@ await db.exec(`update subscriptions set status='active', current_period_end = no
 await as(f, () => db.query(`select void_sale($1,$2)`, [ol, idL]))
 ok('lifecycle: after reactivation, voiding restores the second branch stock and keeps the sale', await stockL(bSecond) === 4 && await stockL(bMain) === 10 && (await db.query(`select status from sales where id='${idL}'`)).rows[0].status === 'void')
 ok('lifecycle: the ledger tells the whole story for the second branch (opening, sale, return)', (await db.query(`select string_agg(reason || ':' || qty_change::int, ',' order by created_at, reason) s from inventory_transactions where org_id='${ol}' and branch_id='${bSecond}'`)).rows[0].s.split(',').sort().join() === 'opening:4,return:3,sale:-3')
+
+// ── Automatic SKU generation (org_counters-based, see 0006_auto_sku.sql) ──
+const skuOrg = (await as(a, () => db.query(`insert into products(org_id,name,cost_price,selling_price) values ('${oa}','Auto SKU Item 1',5,10) returning sku`))).rows[0].sku
+ok('a new product is automatically assigned a SKU', !!skuOrg)
+ok('SKU format is PRD-000001 for the next number in this organization (prior products used explicit SKUs, so this is #1)', /^PRD-\d{6}$/.test(skuOrg))
+const skuOrg2 = (await as(a, () => db.query(`insert into products(org_id,name,cost_price,selling_price) values ('${oa}','Auto SKU Item 2',5,10) returning sku`))).rows[0].sku
+ok('the next product gets the next sequential number', Number(skuOrg2.slice(4)) === Number(skuOrg.slice(4)) + 1)
+ok('all generated SKUs match ^PRD-[0-9]{6}$', [skuOrg, skuOrg2].every((s) => /^PRD-[0-9]{6}$/.test(s)))
+ok('no duplicate SKU exists within the organization', (await db.query(`select sku, count(*) c from products where org_id='${oa}' group by sku having count(*) > 1`)).rows.length === 0)
+const skuOrgB = (await as(b, () => db.query(`insert into products(org_id,name,cost_price,selling_price) values ('${ob}','Auto SKU Item B',5,10) returning sku`))).rows[0].sku
+ok('organization isolation: a second organization\'s SKU sequence starts at its own PRD-000001, independent of org A\'s count', skuOrgB === 'PRD-000001')
+ok('existing (pre-Phase-3) products keep their original, explicitly-assigned SKU untouched', (await db.query(`select sku from products where id='${pid}'`)).rows[0].sku === 'S1')
+await as(a, () => db.query(`update products set name='Auto SKU Item 1 (renamed)', selling_price=11, cost_price=6 where sku='${skuOrg}'`))
+ok('editing a product never regenerates or changes its SKU', (await db.query(`select sku from products where name='Auto SKU Item 1 (renamed)'`)).rows[0].sku === skuOrg)
+ok('duplicate SKU within an organization is rejected at the database level', !!(await rej(as(a, () => db.query(`insert into products(org_id,sku,name,cost_price,selling_price) values ('${oa}','${skuOrg}','Duplicate',1,1)`)))))
+ok('cross-organization SKU assignment is impossible: a non-member cannot insert into org A at all', !!(await rej(as(b, () => db.query(`insert into products(org_id,name,cost_price,selling_price) values ('${oa}','Sneaky',1,1)`)))))
+// Concurrency note: PGlite is a single connection so true simultaneous INSERTs cannot be simulated (same limitation
+// documented for stock/receipt concurrency above). The mechanism is structurally identical to the already-proven
+// receipt counter: an INSERT ... ON CONFLICT (org_id,name) DO UPDATE ... RETURNING on org_counters, which Postgres
+// executes under a per-row lock, so two concurrent inserts for the same organization serialize rather than race.
+ok('SKU numbering reuses the existing org_counters row-locked upsert mechanism (same table/pattern as receipt numbers)', (await db.query(`select value from org_counters where org_id='${oa}' and name='sku'`)).rows[0].value == 2)
+
+// ── Regression: upgrading a pre-Phase-2 database must not break POS/Sales ──
+// Root cause of the reported bugs: an organization created before 0002/0003 were applied had no main
+// branch and no subscription row. 0003 backfills both for every organization that is missing them
+// (see 0003_phase2_products_inventory.sql "Upgrade safety"), BEFORE it makes inventory_transactions.branch_id
+// and sales.branch_id NOT NULL — without that backfill, those NOT NULL steps fail (aborting 0003, so 0004+
+// never apply either, leaving `sales`/`branch_inventory` in a shape the frontend's queries do not match:
+// exactly "Could not load sales"), and any organization left without a subscription row isnot entitled,
+// so `posAllowed` is false and clicking POS redirects straight back to Products.
+const db2 = new PGlite({ extensions: { pg_trgm } })
+await db2.exec(`create schema auth; create table auth.users(id uuid primary key default gen_random_uuid(), raw_user_meta_data jsonb);
+create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.sub',true),'')::uuid $$;
+create role anon; create role authenticated; grant usage on schema public, auth to anon, authenticated;`)
+await db2.exec(readFileSync(new URL('../migrations/0001_core.sql', import.meta.url), 'utf8').replace('create extension if not exists pgcrypto;', ''))
+await db2.exec(`grant select,insert,update,delete on all tables in schema public to authenticated;`)
+const as2 = async (u, fn) => { await db2.exec(`set role authenticated; select set_config('request.sub','${u}',false)`); try { return await fn() } finally { await db2.exec('reset role') } }
+const legacyUser = (await db2.query(`insert into auth.users default values returning id`)).rows[0].id
+const legacyOrg = (await as2(legacyUser, () => db2.query(`select create_organization('Legacy Shop') id`))).rows[0].id
+const legacyProduct = (await as2(legacyUser, () => db2.query(`insert into products(org_id,sku,name,cost_price,selling_price,min_stock) values ('${legacyOrg}','L1','Legacy Item',10,50,3) returning id`))).rows[0].id
+await as2(legacyUser, () => db2.query(`insert into inventory_transactions(org_id,product_id,qty_change,reason) values ('${legacyOrg}','${legacyProduct}',20,'opening')`))
+await as2(legacyUser, () => db2.query(`select complete_sale($1,$2::jsonb,$3::jsonb)`, [legacyOrg, JSON.stringify([{ product_id: legacyProduct, qty: 2 }]), JSON.stringify([{ method: 'cash', amount: 100 }])]))
+for (const file of ['0002_phase1_foundation.sql', '0003_phase2_products_inventory.sql', '0004_phase3_pos_sales.sql', '0005_restrict_helper_execute.sql', '0006_auto_sku.sql'])
+  await db2.exec(readFileSync(new URL(`../migrations/${file}`, import.meta.url), 'utf8'))
+await db2.exec(`grant select,insert,update,delete on all tables in schema public to authenticated;`)  // covers tables created by later migrations (e.g. branch_inventory)
+ok('[regression] an organization that pre-dates branches/subscriptions gets a main branch on upgrade', (await db2.query(`select count(*) c from branches where org_id='${legacyOrg}' and is_main`)).rows[0].c == 1)
+ok('[regression] and gets a trialing subscription, so POS is not silently locked out (Bug 1 root cause)', (await db2.query(`select status from subscriptions where org_id='${legacyOrg}'`)).rows[0].status === 'trialing')
+ok('[regression] its pre-existing stock and ledger history moved onto that main branch without loss', (await db2.query(`select stock_qty from branch_inventory bi join branches br on br.id=bi.branch_id where bi.product_id='${legacyProduct}' and br.is_main`)).rows[0].stock_qty == 18)
+ok('[regression] its pre-existing sale now has a branch_id (Sales.tsx selects this column; a missing column is exactly "Could not load sales")', (await db2.query(`select count(*) c from sales where org_id='${legacyOrg}' and branch_id is not null`)).rows[0].c == 1)
+const legacyBranch = (await db2.query(`select id from branches where org_id='${legacyOrg}' and is_main`)).rows[0].id
+ok('[regression] the Sales.tsx query shape now succeeds for the upgraded organization', !(await rej(as2(legacyUser, () => db2.query(`select id,receipt_no,created_at,status,total,balance_due,branch_id,cashier_id,customer_id from sales where org_id='${legacyOrg}' order by created_at desc limit 20`)))))
+const posShapeErr = await rej(as2(legacyUser, () => db2.query(`select product_id,stock_qty from branch_inventory where org_id='${legacyOrg}' and branch_id='${legacyBranch}'`)))
+ok('[regression] the Pos.tsx branch_inventory query shape now succeeds for the upgraded organization', !posShapeErr)
+const checkoutErr = await rej(as2(legacyUser, () => db2.query(`select complete_sale($1,$2,$3::jsonb,$4::jsonb)`, [legacyOrg, legacyBranch, JSON.stringify([{ product_id: legacyProduct, qty: 1 }]), JSON.stringify([{ method: 'cash', amount: 50 }])])))
+ok('[regression] the upgraded organization can still check out (POS remains usable after upgrade)', !checkoutErr)
+ok('[regression] a completely fresh organization (created after all migrations) is unaffected by the backfill', (await db.query(`select is_org_entitled('${oa}') e`)).rows[0].e === true)
 
 if (failures > 0) { console.log(`\n${failures} test(s) FAILED`); process.exit(1) }
 console.log('\nAll tests passed')

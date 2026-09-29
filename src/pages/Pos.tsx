@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { z } from 'zod'
 import { supabase, friendly } from '../lib/supabase'
+import { errorDetail } from '../lib/errors'
 import { useAuth } from '../features/auth/AuthProvider'
 import { cartTotals, r2 } from '../lib/calc'
 import { METHODS, paymentSummary, paymentsPayload, type Method, type PayLine } from '../lib/payments'
@@ -90,7 +91,7 @@ export default function Pos() {
         <section className="space-y-3 lg:col-span-3">
           <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && q.trim()) void scan(q.trim()) }}
             placeholder="Search name or SKU, or scan a barcode and press Enter" aria-label="Search products" className="w-full rounded-lg border bg-white px-4 py-3" />
-          {found.isError && <p className="text-sm text-red-700">Could not load products. <button className="underline" onClick={() => found.refetch()}>Retry</button></p>}
+          {found.isError && <p className="text-sm text-red-700">Could not load products.<br /><span className="font-mono text-xs">{errorDetail(found.error)}</span> <button className="underline" onClick={() => found.refetch()}>Retry</button></p>}
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {list.map((p) => { const out = p.stock_qty <= 0 && !allowNeg
               return <button key={p.id} disabled={out || !branch} onClick={() => add(p)} className="rounded-xl border bg-white p-3 text-left hover:border-indigo-500 disabled:opacity-50">
