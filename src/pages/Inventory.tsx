@@ -1,8 +1,12 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase, friendly } from '../lib/supabase'
 import { useAuth } from '../features/auth/AuthProvider'
 import { allowed } from '../lib/permissions'
+import {
+  Btn, Card, EmptyState, Field, Notice, PageHeader, Spinner, StatusBadge,
+  TableShell, inputCls, rowCls, selectCls, tdCls, thCls, filterBarCls,
+} from '../components/ui'
 
 type Product = { id: string; sku: string; name: string; is_active: boolean }
 type StockRow = { product_id: string; stock_qty: number; min_stock: number }
@@ -25,6 +29,8 @@ export default function Inventory() {
   const [showHistory, setShowHistory] = useState(false)
   const [note, setNote] = useState<{ ok: boolean; t: string } | null>(null)
   const canAdjust = allowed('adjustInventory', org?.role)
+  // Reset page-local list state on organization change so the old org's search/filters never linger.
+  useEffect(() => { setQ(''); setStatusFilter('all'); setAdjusting(null); setShowHistory(false); setNote(null) }, [org!.id])
 
   const products = useQuery({ queryKey: ['inv-products', org!.id], queryFn: async () => {
     const { data, error } = await supabase.from('products').select('id,sku,name,is_active').eq('org_id', org!.id).eq('is_active', true).order('name')
@@ -43,6 +49,16 @@ export default function Inventory() {
     if (statusFilter === 'out') list = list.filter((p) => p.stock_qty <= 0)
     return list
   }, [products.data, stock.data, q, statusFilter])
+
+  const lowCount = useMemo(() => (products.data ?? []).filter((p) => {
+    const s = stock.data?.find((x) => x.product_id === p.id)
+    const qty = Number(s?.stock_qty ?? 0)
+    return qty > 0 && qty <= Number(s?.min_stock ?? 0)
+  }).length, [products.data, stock.data])
+  const outCount = useMemo(() => (products.data ?? []).filter((p) => {
+    const s = stock.data?.find((x) => x.product_id === p.id)
+    return Number(s?.stock_qty ?? 0) <= 0
+  }).length, [products.data, stock.data])
 
   const history = useQuery({ queryKey: ['inv-history', org!.id, branch?.id], enabled: !!branch && showHistory, queryFn: async () => {
     const { data, error } = await supabase.from('inventory_transactions').select('id,reason,qty_change,note,created_at,product_id,profiles(full_name)').eq('org_id', org!.id).eq('branch_id', branch!.id).order('created_at', { ascending: false }).limit(50)
@@ -70,68 +86,150 @@ export default function Inventory() {
     onSuccess: () => { setNote({ ok: true, t: 'Stock updated.' }); setAdjusting(null); void qc.invalidateQueries({ queryKey: ['branch_inventory'] }); void qc.invalidateQueries({ queryKey: ['inv-history'] }) },
     onError: (e) => setNote({ ok: false, t: friendly(e) }) })
 
-  if (!branch) return <p className="p-4 text-sm text-gray-600">No branch available.</p>
-  const status = (p: Combined) => p.stock_qty <= 0 ? 'Out' : p.stock_qty <= p.min_stock ? 'Low' : 'Healthy'
-  const statusClass = (s: string) => s === 'Out' ? 'text-red-700 font-semibold' : s === 'Low' ? 'text-amber-700 font-semibold' : 'text-gray-700'
+  if (!branch) {
+    return (
+      <div className="space-y-4">
+        <PageHeader title="Inventory" description="Branch stock levels and adjustments." />
+        <Notice tone="warn">No branch available. Ask an owner to give you branch access.</Notice>
+      </div>
+    )
+  }
+  const statusOf = (p: Combined) => p.stock_qty <= 0 ? 'Out' : p.stock_qty <= p.min_stock ? 'Low' : 'Healthy'
+  const toneOf = (s: string): 'red' | 'amber' | 'green' => s === 'Out' ? 'red' : s === 'Low' ? 'amber' : 'green'
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-2xl font-semibold">Inventory</h1>
-        {branches.length > 1 && <label className="text-sm">Branch <select value={branch.id} onChange={(e) => switchBranch(e.target.value)} className="ml-1 rounded-lg border px-2 py-1.5">
-          {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-        </select></label>}
+    <div className="space-y-4">
+      <PageHeader
+        title="Inventory"
+        description={branch ? `Stock at ${branch.name} · ${rows.length} products` : 'Branch stock levels and adjustments.'}
+        actions={branches.length > 1 ? (
+          <label className="text-sm text-slate-600">
+            Branch{' '}
+            <select value={branch.id} onChange={(e) => switchBranch(e.target.value)} aria-label="Branch" className={selectCls}>
+              {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+          </label>
+        ) : undefined}
+      />
+      <div className="grid grid-cols-3 gap-2 sm:gap-3">
+        <Card className="relative overflow-hidden p-3 text-center sm:p-4">
+          <span aria-hidden className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-brand-500 to-brand-300" />
+          <p className="text-lg font-extrabold text-ink-900 sm:text-2xl">{rows.length}</p>
+          <p className="text-xs text-slate-500">Products</p>
+        </Card>
+        <Card className="relative overflow-hidden p-3 text-center sm:p-4">
+          <span aria-hidden className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-amber-500 to-amber-300" />
+          <p className="text-lg font-extrabold text-amber-700 sm:text-2xl">{lowCount}</p>
+          <p className="text-xs text-slate-500">Low stock</p>
+        </Card>
+        <Card className="relative overflow-hidden p-3 text-center sm:p-4">
+          <span aria-hidden className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-red-600 to-red-300" />
+          <p className="text-lg font-extrabold text-red-700 sm:text-2xl">{outCount}</p>
+          <p className="text-xs text-slate-500">Out of stock</p>
+        </Card>
       </div>
-      {note && <p role="status" className={`rounded-lg p-3 text-sm ${note.ok ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-700'}`}>{note.t}</p>}
-      <div className="flex flex-wrap gap-2">
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search products" aria-label="Search inventory" className="w-full max-w-xs rounded-lg border bg-white px-3 py-2" />
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)} className="rounded-lg border bg-white px-3 py-2 text-sm">
+      {note && <Notice tone={note.ok ? 'ok' : 'err'}>{note.t}</Notice>}
+      <div className={filterBarCls}>
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search products" aria-label="Search inventory" className={`${inputCls} sm:max-w-xs`} />
+        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)} aria-label="Stock level filter" className={selectCls}>
           <option value="all">All stock levels</option><option value="low">Low stock</option><option value="out">Out of stock</option>
         </select>
       </div>
-      <div className="overflow-x-auto rounded-xl border bg-white"><table className="w-full text-left text-sm">
-        <thead className="bg-gray-50"><tr>{['Product', 'SKU', 'Stock', 'Minimum', 'Status', ''].map((h) => <th key={h} className="p-3">{h}</th>)}</tr></thead>
+      <TableShell label="Inventory">
+        <thead>
+          <tr>
+            <th className={thCls}>Product</th><th className={thCls}>SKU</th><th className={`${thCls} text-right`}>Stock</th>
+            <th className={thCls}>Minimum</th><th className={thCls}>Status</th><th className={thCls}><span className="sr-only">Actions</span></th>
+          </tr>
+        </thead>
         <tbody>
-          {(products.isLoading || stock.isLoading) && <tr><td className="p-4" colSpan={6}>Loading…</td></tr>}
-          {(products.isError || stock.isError) && <tr><td className="p-4 text-red-700" colSpan={6}>Could not load inventory.</td></tr>}
-          {rows.length === 0 && !products.isLoading && <tr><td className="p-4 text-gray-600" colSpan={6}>No products match.</td></tr>}
-          {rows.map((p) => <tr key={p.id} className="border-t">
-            <td className="p-3">{p.name}</td><td className="p-3">{p.sku}</td><td className="p-3">{p.stock_qty}</td>
-            <td className="p-3">{canAdjust ? <input type="number" min={0} defaultValue={p.min_stock} className="w-20 rounded border px-2 py-1"
-              onBlur={(e) => { const v = Number(e.target.value); if (v !== p.min_stock && v >= 0) setMinStock.mutate({ productId: p.id, min: v }) }} /> : p.min_stock}</td>
-            <td className={`p-3 ${statusClass(status(p))}`}>{status(p)}</td>
-            <td className="p-3">{canAdjust && <button className="text-indigo-700 underline" onClick={() => setAdjusting(p)}>Adjust</button>}</td>
-          </tr>)}
-        </tbody></table></div>
+          {(products.isLoading || stock.isLoading) && <tr><td className="p-4" colSpan={6}><Spinner label="Loading inventory…" /></td></tr>}
+          {(products.isError || stock.isError) && <tr><td className="p-4 text-red-700" colSpan={6}>Could not load inventory. <button className="font-medium underline" onClick={() => { void products.refetch(); void stock.refetch() }}>Retry</button></td></tr>}
+          {rows.length === 0 && !products.isLoading && !stock.isLoading && !(products.isError || stock.isError) && (
+            <tr><td colSpan={6}><EmptyState title="No products match." hint="Try a different search or stock filter." /></td></tr>
+          )}
+          {rows.map((p) => (
+            <tr key={p.id} className={rowCls}>
+              <td className={`${tdCls} font-medium`}>{p.name}</td>
+              <td className={`${tdCls} font-mono text-xs`}>{p.sku}</td>
+              <td className={`${tdCls} text-right font-semibold ${p.stock_qty <= 0 ? 'text-red-700' : ''}`}>{p.stock_qty}</td>
+              <td className={tdCls}>
+                {canAdjust ? (
+                  <input
+                    type="number"
+                    min={0}
+                    defaultValue={p.min_stock}
+                    aria-label={`Minimum stock for ${p.name}`}
+                    className="w-20 rounded-lg border border-brand-100 px-2 py-1 text-sm"
+                    onBlur={(e) => { const v = Number(e.target.value); if (v !== p.min_stock && v >= 0) setMinStock.mutate({ productId: p.id, min: v }) }}
+                  />
+                ) : p.min_stock}
+              </td>
+              <td className={tdCls}><StatusBadge tone={toneOf(statusOf(p))}>{statusOf(p)}</StatusBadge></td>
+              <td className={tdCls}>{canAdjust && <button className="font-medium text-brand-700 hover:underline" onClick={() => setAdjusting(p)}>Adjust</button>}</td>
+            </tr>
+          ))}
+        </tbody>
+      </TableShell>
 
-      {adjusting && <div className="fixed inset-0 flex items-center justify-center bg-black/30 p-4" onClick={() => setAdjusting(null)}>
-        <form className="w-full max-w-sm space-y-3 rounded-xl bg-white p-4" onClick={(e) => e.stopPropagation()}
-          onSubmit={(e) => { e.preventDefault(); const f = new FormData(e.currentTarget)
-            adjust.mutate({ reason: f.get('reason') as Reason, qty: Number(f.get('qty')), note: String(f.get('note') || '') }) }}>
-          <h2 className="font-semibold">Adjust stock — {adjusting.name}</h2>
-          <p className="text-sm text-gray-600">Current stock at {branch.name}: {adjusting.stock_qty}</p>
-          <label className="block text-sm">Reason<select name="reason" defaultValue="adjustment" className="mt-1 w-full rounded border px-3 py-2">
-            {REASONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>
-          <label className="block text-sm">Quantity<input name="qty" type="number" step="any" required className="mt-1 w-full rounded border px-3 py-2" /></label>
-          <label className="block text-sm">Note (optional)<input name="note" className="mt-1 w-full rounded border px-3 py-2" /></label>
-          <div className="flex justify-end gap-2"><button type="button" onClick={() => setAdjusting(null)} className="rounded-lg border px-4 py-2">Cancel</button>
-            <button disabled={adjust.isPending} className="rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white disabled:opacity-60">{adjust.isPending ? 'Saving…' : 'Save'}</button></div>
-        </form>
-      </div>}
+      {adjusting && (
+        <div className="fixed inset-0 z-20 flex items-center justify-center bg-slate-900/50 p-4" onClick={() => setAdjusting(null)}>
+          <form
+            role="dialog"
+            aria-label={`Adjust stock for ${adjusting.name}`}
+            className="w-full max-w-sm space-y-3 rounded-2xl border border-brand-100 bg-white p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={(e) => { e.preventDefault(); const f = new FormData(e.currentTarget)
+              adjust.mutate({ reason: f.get('reason') as Reason, qty: Number(f.get('qty')), note: String(f.get('note') || '') }) }}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <h2 className="text-base font-semibold text-slate-900">Adjust stock — {adjusting.name}</h2>
+              <button type="button" onClick={() => setAdjusting(null)} aria-label="Close dialog" className="rounded-lg px-2 py-1 text-lg leading-none text-slate-500 hover:bg-slate-100">✕</button>
+            </div>
+            <p className="text-sm text-slate-600">Current stock at {branch.name}: <strong>{adjusting.stock_qty}</strong></p>
+            <Field label="Reason">
+              <select name="reason" defaultValue="adjustment" className={selectCls + ' w-full'}>
+                {REASONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+            </Field>
+            <Field label="Quantity" required>
+              <input name="qty" type="number" step="any" required className={inputCls} />
+            </Field>
+            <Field label="Note (optional)">
+              <input name="note" className={inputCls} />
+            </Field>
+            <div className="flex justify-end gap-2">
+              <Btn type="button" onClick={() => setAdjusting(null)}>Cancel</Btn>
+              <Btn type="submit" variant="primary" disabled={adjust.isPending}>{adjust.isPending ? 'Saving…' : 'Save'}</Btn>
+            </div>
+          </form>
+        </div>
+      )}
 
-      <details open={showHistory} onToggle={(e) => setShowHistory(e.currentTarget.open)} className="rounded-xl border bg-white p-4">
-        <summary className="cursor-pointer font-medium">Inventory history (this branch)</summary>
-        <div className="mt-3 overflow-x-auto"><table className="w-full text-left text-sm">
-          <thead className="bg-gray-50"><tr>{['When', 'Product', 'Reason', 'Change', 'By', 'Note'].map((h) => <th key={h} className="p-2">{h}</th>)}</tr></thead>
-          <tbody>
-            {history.isLoading && <tr><td className="p-2" colSpan={6}>Loading…</td></tr>}
-            {history.data?.length === 0 && <tr><td className="p-2 text-gray-600" colSpan={6}>No transactions yet.</td></tr>}
-            {history.data?.map((h) => <tr key={h.id} className="border-t"><td className="p-2">{new Date(h.created_at).toLocaleString()}</td>
-              <td className="p-2">{productName(h.product_id)}</td><td className="p-2 capitalize">{h.reason}</td>
-              <td className={`p-2 ${Number(h.qty_change) < 0 ? 'text-red-700' : 'text-green-700'}`}>{Number(h.qty_change) > 0 ? '+' : ''}{Number(h.qty_change)}</td>
-              <td className="p-2">{h.profiles?.full_name ?? '—'}</td><td className="p-2">{h.note ?? ''}</td></tr>)}
-          </tbody></table></div>
-      </details>
+      <Card className="p-4">
+        <details open={showHistory} onToggle={(e) => setShowHistory(e.currentTarget.open)}>
+          <summary className="cursor-pointer text-sm font-semibold text-slate-900">Inventory history (this branch)</summary>
+          <div className="scroll-slim mt-3 overflow-x-auto">
+            <table className="w-full min-w-[560px] text-left text-sm">
+              <thead className="bg-slate-50"><tr>{['When', 'Product', 'Reason', 'Change', 'By', 'Note'].map((h) => <th key={h} className={thCls}>{h}</th>)}</tr></thead>
+              <tbody>
+                {history.isLoading && showHistory && <tr><td className="p-2" colSpan={6}><Spinner label="Loading history…" /></td></tr>}
+                {history.data?.length === 0 && <tr><td className="p-2 text-slate-600" colSpan={6}>No transactions yet.</td></tr>}
+                {history.data?.map((h) => (
+                  <tr key={h.id} className={rowCls}>
+                    <td className={`${tdCls} whitespace-nowrap`}>{new Date(h.created_at).toLocaleString()}</td>
+                    <td className={tdCls}>{productName(h.product_id)}</td>
+                    <td className={`${tdCls} capitalize`}>{h.reason}</td>
+                    <td className={`${tdCls} font-semibold ${Number(h.qty_change) < 0 ? 'text-red-700' : 'text-emerald-700'}`}>{Number(h.qty_change) > 0 ? '+' : ''}{Number(h.qty_change)}</td>
+                    <td className={tdCls}>{h.profiles?.full_name ?? '—'}</td>
+                    <td className={tdCls}>{h.note ?? ''}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      </Card>
     </div>
   )
 }

@@ -6,6 +6,7 @@ const ctx = (userId: string | null, orgId: string | null, branchId: string | nul
 const seed = (qc: QueryClient) => {
   const k: [unknown[], string][] = [
     [['products', 'A', 0], 'A-products'], [['categories', 'A'], 'A-cats'], [['branch_inventory', 'A', 'a1'], 'A-a1-stock'], [['branch_inventory', 'A', 'a2'], 'A-a2-stock'],
+    [['pos-stock', 'A', 'a1'], 'A-a1-pos-stock'],
     [['inv-history', 'A', 'a1'], 'A-a1-hist'], [['sales', 'A', '', 0], 'A-sales'], [['pos-search', 'A', 'x'], 'A-pos'], [['sale', 'A', 's1'], 'A-sale'],
     [['products', 'B', 0], 'B-products'], [['branch_inventory', 'B', 'b1'], 'B-b1-stock'], [['customers', 'B'], 'B-custs'],
   ]
@@ -18,7 +19,7 @@ describe('organization switch (A → B)', () => {
   it('removes every cached entry of the previous organization, so none can be shown under B', () => {
     const qc = new QueryClient(); seed(qc)
     applyContextChange(qc, ctx('u', 'A', 'a1'), ctx('u', 'B', 'b1'))
-    for (const key of [['products', 'A', 0], ['categories', 'A'], ['branch_inventory', 'A', 'a1'], ['branch_inventory', 'A', 'a2'], ['inv-history', 'A', 'a1'], ['sales', 'A', '', 0], ['pos-search', 'A', 'x'], ['sale', 'A', 's1']])
+    for (const key of [['products', 'A', 0], ['categories', 'A'], ['branch_inventory', 'A', 'a1'], ['branch_inventory', 'A', 'a2'], ['pos-stock', 'A', 'a1'], ['inv-history', 'A', 'a1'], ['sales', 'A', '', 0], ['pos-search', 'A', 'x'], ['sale', 'A', 's1']])
       expect(has(qc, key)).toBe(false)
   })
   it('keeps the new organization\'s entries but marks them stale so they refetch', () => {
@@ -37,7 +38,7 @@ describe('branch switch within an organization (a1 → a2)', () => {
   it('removes the previous branch\'s stock and history, keeps the org-level cache', () => {
     const qc = new QueryClient(); seed(qc)
     applyContextChange(qc, ctx('u', 'A', 'a1'), ctx('u', 'A', 'a2'))
-    expect(has(qc, ['branch_inventory', 'A', 'a1'])).toBe(false); expect(has(qc, ['inv-history', 'A', 'a1'])).toBe(false)
+    expect(has(qc, ['branch_inventory', 'A', 'a1'])).toBe(false); expect(has(qc, ['pos-stock', 'A', 'a1'])).toBe(false); expect(has(qc, ['inv-history', 'A', 'a1'])).toBe(false)
     expect(has(qc, ['products', 'A', 0])).toBe(true); expect(has(qc, ['categories', 'A'])).toBe(true)
   })
   it('invalidates branch-scoped stock, sales and POS availability', () => {
@@ -64,7 +65,17 @@ describe('user change / sign-out', () => {
   })
   it('does nothing when the context did not change', () => {
     const qc = new QueryClient(); seed(qc); applyContextChange(qc, ctx('u', 'A', 'a1'), ctx('u', 'A', 'a1'))
-    expect(qc.getQueryCache().getAll()).toHaveLength(11); expect(stale(qc, ['branch_inventory', 'A', 'a1'])).toBe(false)
+    expect(qc.getQueryCache().getAll()).toHaveLength(12); expect(stale(qc, ['branch_inventory', 'A', 'a1'])).toBe(false)
+  })
+})
+
+describe('POS and Inventory no longer share one cache shape', () => {
+  it('registering both shapes side by side is the regression test for the POS -> Inventory crash', () => {
+    const qc = new QueryClient()
+    qc.setQueryData(['pos-stock', 'A', 'a1'], new Map([['p1', 3]]))
+    qc.setQueryData(['branch_inventory', 'A', 'a1'], [{ product_id: 'p1', stock_qty: 3, min_stock: 1 }])
+    expect((qc.getQueryData(['pos-stock', 'A', 'a1']) as Map<string, number>).get('p1')).toBe(3)
+    expect((qc.getQueryData(['branch_inventory', 'A', 'a1']) as { product_id: string }[]).map((r) => r.product_id)).toEqual(['p1'])
   })
 })
 

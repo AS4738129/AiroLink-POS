@@ -1,9 +1,13 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { z } from 'zod'
 import { supabase, friendly } from '../lib/supabase'
 import { useAuth } from '../features/auth/AuthProvider'
 import { allowed } from '../lib/permissions'
+import {
+  Btn, Card, EmptyState, Field, Notice, PageHeader, Spinner, StatusBadge,
+  TableShell, inputCls, rowCls, selectCls, tdCls, thCls, filterBarCls,
+} from '../components/ui'
 
 const PAGE = 20
 const schema = z.object({
@@ -31,9 +35,12 @@ export default function Products() {
   const [categoryFilter, setCategoryFilter] = useState(''); const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('active')
   const [sort, setSort] = useState<SortKey>('name'); const [dir, setDir] = useState<'asc' | 'desc'>('asc')
   const [editing, setEditing] = useState<Row | null>(null)
+  const [formOpen, setFormOpen] = useState(false)
   const [errs, setErrs] = useState<Record<string, string>>({}); const [note, setNote] = useState<{ ok: boolean; t: string } | null>(null)
   const [newCategory, setNewCategory] = useState('')
   const canEdit = allowed('editProducts', org?.role)
+  // Reset page-local list state on organization change so the old org's filters/page never linger.
+  useEffect(() => { setPage(0); setQ(''); setCategoryFilter(''); setStatusFilter('active'); setSort('name'); setDir('asc'); setEditing(null); setFormOpen(false); setErrs({}); setNote(null); setNewCategory('') }, [org!.id])
 
   const categories = useQuery({ queryKey: ['categories', org!.id], queryFn: async () => {
     const { data, error } = await supabase.from('categories').select('id,name').eq('org_id', org!.id).order('name')
@@ -74,7 +81,7 @@ export default function Products() {
       if (editing) { const { error } = await supabase.from('products').update(payload).eq('id', editing.id); if (error) throw error }
       else { const { error } = await supabase.from('products').insert(payload); if (error) throw error }
     },
-    onSuccess: () => { setNote({ ok: true, t: editing ? 'Product updated.' : 'Product added. Set its opening stock from the Inventory page.' }); setEditing(null); void qc.invalidateQueries({ queryKey: ['products'] }) },
+    onSuccess: () => { setNote({ ok: true, t: editing ? 'Product updated.' : 'Product added. Set its opening stock from the Inventory page.' }); setEditing(null); setFormOpen(false); void qc.invalidateQueries({ queryKey: ['products'] }) },
     onError: (e) => setNote({ ok: false, t: friendly(e) }) })
   const toggle = useMutation({ mutationFn: async (p: Row) => { const { error } = await supabase.from('products').update({ is_active: !p.is_active }).eq('id', p.id); if (error) throw error },
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['products'] }), onError: (e) => setNote({ ok: false, t: friendly(e) }) })
@@ -88,78 +95,169 @@ export default function Products() {
     setErrs({}); save.mutate(p.data, { onSuccess: () => f.reset() })
   }
   const sortHeader = (key: SortKey, label: string) => (
-    <th className="cursor-pointer select-none p-3" onClick={() => { if (sort === key) setDir(dir === 'asc' ? 'desc' : 'asc'); else { setSort(key); setDir('asc') } }}>
+    <th className={`${thCls} cursor-pointer select-none hover:text-brand-700`} onClick={() => { if (sort === key) setDir(dir === 'asc' ? 'desc' : 'asc'); else { setSort(key); setDir('asc') } }} aria-sort={sort === key ? (dir === 'asc' ? 'ascending' : 'descending') : undefined}>
       {label}{sort === key ? (dir === 'asc' ? ' ▲' : ' ▼') : ''}
     </th>
   )
-  const inp = 'w-full rounded-lg border px-3 py-2'
-  const field = (n: keyof FormValues, label: string, type = 'text', opts?: { step?: string }) =>
-    <label className="block text-sm">{label}<input name={n} type={type} step={opts?.step} defaultValue={editing ? String((editing as unknown as Record<string, unknown>)[n] ?? '') : undefined} className={inp} />{errs[n] && <span className="text-xs text-red-700">{errs[n]}</span>}</label>
+  const field = (n: keyof FormValues, label: string, type = 'text', opts?: { step?: string; required?: boolean }) => (
+    <Field label={label} required={opts?.required} error={errs[n]}>
+      <input
+        name={n}
+        type={type}
+        step={opts?.step}
+        defaultValue={editing ? String((editing as unknown as Record<string, unknown>)[n] ?? '') : undefined}
+        className={inputCls}
+      />
+    </Field>
+  )
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-semibold">Products</h1>
+    <div className="space-y-4">
+      <PageHeader
+        title="Products"
+        description="Catalogue, pricing and categories. Stock lives on the Inventory page."
+        actions={canEdit ? (
+          <Btn variant="primary" onClick={() => { setEditing(null); setErrs({}); setFormOpen((v) => !v) }} aria-expanded={formOpen}>
+            {formOpen ? 'Close form' : '+ Add product'}
+          </Btn>
+        ) : undefined}
+      />
 
-      {canEdit && <details className="rounded-xl border bg-white p-4">
-        <summary className="cursor-pointer font-medium">Categories ({categories.data?.length ?? 0})</summary>
-        <div className="mt-3 space-y-2">
-          {categories.data?.map((c) => (
-            <div key={c.id} className="flex items-center gap-2 text-sm">
-              <input defaultValue={c.name} className="flex-1 rounded border px-2 py-1" onBlur={(e) => { if (e.target.value.trim() && e.target.value !== c.name) renameCategory.mutate({ id: c.id, name: e.target.value.trim() }) }} />
-              <button className="text-red-700 underline" onClick={() => { if (confirm(`Delete "${c.name}"? Products keep their other details but lose this category.`)) deleteCategory.mutate(c.id) }}>Delete</button>
+      {canEdit && (
+        <details className="rounded-xl border border-brand-100 bg-white p-4 shadow-[0_1px_2px_rgba(11,37,69,0.05),0_8px_24px_-12px_rgba(28,109,217,0.18)]">
+          <summary className="cursor-pointer text-sm font-semibold text-slate-900">
+            Categories ({categories.data?.length ?? 0})
+          </summary>
+          <div className="mt-3 space-y-2">
+            {categories.data?.map((c) => (
+              <div key={c.id} className="flex items-center gap-2 text-sm">
+                <input
+                  defaultValue={c.name}
+                  aria-label={`Rename category ${c.name}`}
+                  className={`${inputCls} flex-1 py-1`}
+                  onBlur={(e) => { if (e.target.value.trim() && e.target.value !== c.name) renameCategory.mutate({ id: c.id, name: e.target.value.trim() }) }}
+                />
+                <button className="shrink-0 font-medium text-red-700 hover:underline" onClick={() => { if (confirm(`Delete "${c.name}"? Products keep their other details but lose this category.`)) deleteCategory.mutate(c.id) }}>
+                  Delete
+                </button>
+              </div>
+            ))}
+            <div className="flex gap-2">
+              <input value={newCategory} onChange={(e) => setNewCategory(e.target.value)} placeholder="New category name" aria-label="New category name" className={`${inputCls} flex-1 py-1`} />
+              <Btn disabled={!newCategory.trim() || addCategory.isPending} onClick={() => addCategory.mutate(newCategory.trim())}>
+                Add
+              </Btn>
             </div>
-          ))}
-          <div className="flex gap-2">
-            <input value={newCategory} onChange={(e) => setNewCategory(e.target.value)} placeholder="New category name" className="flex-1 rounded border px-2 py-1" />
-            <button disabled={!newCategory.trim() || addCategory.isPending} onClick={() => addCategory.mutate(newCategory.trim())} className="rounded border bg-gray-50 px-3 py-1">Add</button>
           </div>
-        </div>
-      </details>}
+        </details>
+      )}
 
-      {canEdit && <form key={editing?.id ?? 'new'} onSubmit={submit} className="grid gap-3 rounded-xl border bg-white p-4 sm:grid-cols-3">
-        <p className="col-span-full text-sm font-medium">{editing ? `Editing ${editing.name}` : 'Add a product'}</p>
-        {field('name', 'Name')}{field('barcode', 'Barcode (optional)')}
-        {editing && <p className="block text-sm text-gray-600">SKU<br /><span className="font-mono">{editing.sku}</span> <span className="text-xs">(assigned automatically, cannot be changed)</span></p>}
-        <label className="block text-sm">Category<select name="category_id" defaultValue={editing?.category_id ?? ''} className={inp}>
-          <option value="">Uncategorized</option>{categories.data?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select></label>
-        {field('brand', 'Brand (optional)')}{field('unit', 'Unit', 'text')}
-        {field('cost_price', 'Cost price', 'number', { step: 'any' })}{field('selling_price', 'Selling price', 'number', { step: 'any' })}
-        <label className="block text-sm">Description (optional)<input name="description" defaultValue={editing?.description ?? ''} className={inp} /></label>
-        <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="taxable" defaultChecked={editing ? editing.taxable : true} /> Taxable</label>
-        <div className="flex items-end gap-2">
-          <button disabled={save.isPending} className="rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white disabled:opacity-60">{save.isPending ? 'Saving…' : editing ? 'Save changes' : 'Add product'}</button>
-          {editing && <button type="button" onClick={() => setEditing(null)} className="rounded-lg border px-4 py-2">Cancel</button>}
-        </div>
-      </form>}
-      {note && <p role="status" className={`rounded-lg p-3 text-sm ${note.ok ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-700'}`}>{note.t}</p>}
+      {canEdit && formOpen && (
+        <Card className="p-4 sm:p-5">
+          <form key={editing?.id ?? 'new'} onSubmit={submit} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <p className="col-span-full text-sm font-semibold text-slate-900">{editing ? `Editing ${editing.name}` : 'Add a product'}</p>
+            {field('name', 'Name', 'text', { required: true })}
+            {field('barcode', 'Barcode (optional)')}
+            {editing && (
+              <p className="text-sm text-slate-600">
+                SKU<br />
+                <span className="font-mono font-medium text-slate-900">{editing.sku}</span>{' '}
+                <span className="text-xs">(assigned automatically, cannot be changed)</span>
+              </p>
+            )}
+            <Field label="Category">
+              <select name="category_id" defaultValue={editing?.category_id ?? ''} className={selectCls + ' w-full'}>
+                <option value="">Uncategorized</option>
+                {categories.data?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </Field>
+            {field('brand', 'Brand (optional)')}
+            {field('unit', 'Unit', 'text', { required: true })}
+            {field('cost_price', 'Cost price', 'number', { step: 'any', required: true })}
+            {field('selling_price', 'Selling price', 'number', { step: 'any', required: true })}
+            <Field label="Description (optional)">
+              <input name="description" defaultValue={editing?.description ?? ''} className={inputCls} />
+            </Field>
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" name="taxable" defaultChecked={editing ? editing.taxable : true} className="size-4 accent-brand-600" /> Taxable
+            </label>
+            <div className="flex items-end gap-2 sm:col-span-2 lg:col-span-3">
+              <Btn variant="primary" disabled={save.isPending}>
+                {save.isPending ? 'Saving…' : editing ? 'Save changes' : 'Add product'}
+              </Btn>
+              {editing ? (
+                <Btn type="button" onClick={() => { setEditing(null); setFormOpen(false) }}>Cancel</Btn>
+              ) : (
+                <Btn type="button" onClick={() => setFormOpen(false)}>Close</Btn>
+              )}
+            </div>
+          </form>
+        </Card>
+      )}
+      {note && <Notice tone={note.ok ? 'ok' : 'err'}>{note.t}</Notice>}
 
-      <div className="flex flex-wrap gap-2">
-        <input value={q} onChange={(e) => { setQ(e.target.value); setPage(0) }} placeholder="Search name, SKU or barcode" aria-label="Search products" className={inp + ' bg-white sm:max-w-xs'} />
-        <select value={categoryFilter} onChange={(e) => { setCategoryFilter(e.target.value); setPage(0) }} className="rounded-lg border bg-white px-3 py-2 text-sm">
-          <option value="">All categories</option>{categories.data?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+      <div className={filterBarCls}>
+        <input value={q} onChange={(e) => { setQ(e.target.value); setPage(0) }} placeholder="Search name, SKU or barcode" aria-label="Search products" className={`${inputCls} sm:max-w-xs`} />
+        <select value={categoryFilter} onChange={(e) => { setCategoryFilter(e.target.value); setPage(0) }} aria-label="Category filter" className={selectCls}>
+          <option value="">All categories</option>
+          {categories.data?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
-        <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value as typeof statusFilter); setPage(0) }} className="rounded-lg border bg-white px-3 py-2 text-sm">
-          <option value="active">Active</option><option value="inactive">Inactive</option><option value="all">All</option>
+        <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value as typeof statusFilter); setPage(0) }} aria-label="Status filter" className={selectCls}>
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+          <option value="all">All</option>
         </select>
       </div>
 
-      <div className="overflow-x-auto rounded-xl border bg-white"><table className="w-full text-left text-sm">
-        <thead className="bg-gray-50"><tr>{sortHeader('sku', 'SKU')}{sortHeader('name', 'Name')}<th className="p-3">Category</th>{sortHeader('selling_price', 'Price')}<th className="p-3">Status</th><th className="p-3"></th></tr></thead>
+      <TableShell label="Products">
+        <thead>
+          <tr>
+            {sortHeader('sku', 'SKU')}
+            {sortHeader('name', 'Name')}
+            <th className={thCls}>Category</th>
+            {sortHeader('selling_price', 'Price')}
+            <th className={thCls}>Status</th>
+            <th className={thCls}><span className="sr-only">Actions</span></th>
+          </tr>
+        </thead>
         <tbody>
-          {list.isLoading && <tr><td className="p-4" colSpan={6}>Loading…</td></tr>}
-          {list.isError && <tr><td className="p-4 text-red-700" colSpan={6}>Could not load products. <button className="underline" onClick={() => list.refetch()}>Retry</button></td></tr>}
-          {list.data?.rows.length === 0 && <tr><td className="p-4 text-gray-600" colSpan={6}>No products match.</td></tr>}
-          {list.data?.rows.map((p) => <tr key={p.id} className="border-t">
-            <td className="p-3">{p.sku}</td><td className="p-3">{p.name}</td><td className="p-3">{categoryName(p.category_id)}</td>
-            <td className="p-3">{Number(p.selling_price).toFixed(2)}</td>
-            <td className="p-3">{p.is_active ? 'Active' : 'Inactive'}</td>
-            <td className="space-x-3 p-3">{canEdit && <><button className="text-indigo-700 underline" onClick={() => setEditing(p)}>Edit</button>
-              <button className="text-indigo-700 underline" onClick={() => toggle.mutate(p)}>{p.is_active ? 'Deactivate' : 'Activate'}</button></>}</td></tr>)}
-        </tbody></table></div>
-      <div className="flex items-center gap-3 text-sm"><button disabled={page === 0} onClick={() => setPage(page - 1)} className="rounded border bg-white px-3 py-1.5 disabled:opacity-40">Previous</button>
+          {list.isLoading && <tr><td className="p-4" colSpan={6}><Spinner label="Loading products…" /></td></tr>}
+          {list.isError && (
+            <tr><td className="p-4 text-red-700" colSpan={6}>
+              Could not load products. <button className="font-medium underline" onClick={() => list.refetch()}>Retry</button>
+            </td></tr>
+          )}
+          {list.data && list.data.rows.length === 0 && (
+            <tr><td colSpan={6}><EmptyState title="No products match." hint="Try a different search or filter — or add a product above." /></td></tr>
+          )}
+          {list.data?.rows.map((p) => (
+            <tr key={p.id} className={rowCls}>
+              <td className={`${tdCls} font-mono text-xs`}>{p.sku}</td>
+              <td className={`${tdCls} font-medium`}>{p.name}</td>
+              <td className={tdCls}>{categoryName(p.category_id)}</td>
+              <td className={`${tdCls} whitespace-nowrap`}>{org!.currency} {Number(p.selling_price).toFixed(2)}</td>
+              <td className={tdCls}>
+                <StatusBadge tone={p.is_active ? 'green' : 'slate'}>{p.is_active ? 'Active' : 'Inactive'}</StatusBadge>
+              </td>
+              <td className={`${tdCls} whitespace-nowrap`}>
+                {canEdit && (
+                  <>
+                    <button className="font-medium text-brand-700 hover:underline" onClick={() => { setEditing(p); setErrs({}); setFormOpen(true) }}>Edit</button>
+                    <button className="ml-3 font-medium text-brand-700 hover:underline" onClick={() => toggle.mutate(p)}>
+                      {p.is_active ? 'Deactivate' : 'Activate'}
+                    </button>
+                  </>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </TableShell>
+      <div className="flex items-center gap-3 text-sm text-slate-600">
+        <Btn disabled={page === 0} onClick={() => setPage(page - 1)}>Previous</Btn>
         <span>Page {page + 1} of {Math.max(1, Math.ceil((list.data?.count ?? 0) / PAGE))}</span>
-        <button disabled={(page + 1) * PAGE >= (list.data?.count ?? 0)} onClick={() => setPage(page + 1)} className="rounded border bg-white px-3 py-1.5 disabled:opacity-40">Next</button></div>
+        <Btn disabled={(page + 1) * PAGE >= (list.data?.count ?? 0)} onClick={() => setPage(page + 1)}>Next</Btn>
+      </div>
     </div>
   )
 }

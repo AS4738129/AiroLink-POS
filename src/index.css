@@ -1,4 +1,59 @@
-@import "tailwindcss"; body{font-family:system-ui,sans-serif;background:#f6f7f9;color:#111827}
+@import "tailwindcss";
+
+@theme {
+  --color-brand-50: #eef5ff;
+  --color-brand-100: #dbeafe;
+  --color-brand-200: #bfd7fe;
+  --color-brand-300: #93bbfd;
+  --color-brand-400: #5b94f6;
+  --color-brand-500: #1c6dd9;
+  --color-brand-600: #155bb5;
+  --color-brand-700: #124a94;
+  --color-brand-800: #0e3a75;
+  --color-brand-900: #0b2545;
+  --color-ink-700: #14315c;
+  --color-ink-800: #0e2347;
+  --color-ink-900: #0b1b33;
+  --color-ink-950: #071224;
+  --color-mist-50: #f2f7ff;
+  --color-mist-100: #e9f1fc;
+  --color-mist-200: #dbe7f8;
+}
+
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: #e9f1fc;
+  color: #0f172a;
+}
+
+/* Branded auth background: deep navy with restrained sea-blue radial glows
+   (technology feel without brightness/distraction). */
+.auth-bg {
+  background:
+    radial-gradient(42rem 26rem at 12% -8%, rgba(28, 109, 217, 0.38), transparent 62%),
+    radial-gradient(36rem 24rem at 105% 12%, rgba(14, 116, 180, 0.30), transparent 60%),
+    radial-gradient(30rem 22rem at 50% 115%, rgba(29, 78, 216, 0.22), transparent 62%),
+    linear-gradient(160deg, #0e2347 0%, #0b1b33 52%, #071224 100%);
+}
+
+/* Faint grid texture for the auth background; very low opacity on purpose. */
+.auth-grid {
+  background-image:
+    linear-gradient(rgba(147, 187, 253, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(147, 187, 253, 0.07) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(38rem 30rem at 50% 30%, black 30%, transparent 78%);
+}
+
+/* Consistent focus visibility for keyboard users */
+:where(a, button, input, select, textarea):focus-visible {
+  outline: 2px solid #1c6dd9;
+  outline-offset: 2px;
+}
+
+/* Slim, unobtrusive scrollbars for table regions */
+.scroll-slim::-webkit-scrollbar { height: 8px; width: 8px }
+.scroll-slim::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 8px }
 
 /* Printing: only the receipt is printed; suits A4 and (narrow max-w) thermal paper. */
 @media print {
