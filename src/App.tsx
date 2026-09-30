@@ -10,6 +10,9 @@ import Pos from './pages/Pos'
 import Products from './pages/Products'
 import Inventory from './pages/Inventory'
 import Sales from './pages/Sales'
+import Customers from './pages/Customers'
+import Suppliers from './pages/Suppliers'
+import Purchases from './pages/Purchases'
 import { ContextCacheSync } from './components/ContextCacheSync'
 import { BrandMark, Spinner } from './components/ui'
 
@@ -28,6 +31,9 @@ const NAV = [
   { to: '/products', label: 'Products', feature: 'products' },
   { to: '/inventory', label: 'Inventory', feature: 'inventory' },
   { to: '/sales', label: 'Sales', feature: 'salesHistory' },
+  { to: '/customers', label: 'Customers', feature: 'customers' },
+  { to: '/suppliers', label: 'Suppliers', feature: 'suppliers' },
+  { to: '/purchases', label: 'Purchases', feature: 'purchases' },
 ] as const
 
 function navCls({ isActive }: { isActive: boolean }) {
@@ -59,6 +65,9 @@ function AppShell() {
   const posAllowed = allowed('pos', org.role) && entitled
   const inventoryAllowed = allowed('inventory', org.role)
   const salesAllowed = allowed('salesHistory', org.role)
+  const customersAllowed = allowed('customers', org.role)
+  const suppliersAllowed = allowed('suppliers', org.role)
+  const purchasesAllowed = allowed('purchases', org.role)
   const items = NAV.filter((n) => allowed(n.feature, org.role))
   // Display-only: prefer the sign-up full name, fall back to the account email. No auth/org logic changes.
   const meta = session.user.user_metadata as { full_name?: unknown } | undefined
@@ -205,6 +214,9 @@ function AppShell() {
                 element={inventoryAllowed ? <Inventory key={branch?.id ?? 'none'} /> : <Navigate to="/products" />}
               />
               <Route path="/sales" element={salesAllowed ? <Sales /> : <Navigate to="/products" />} />
+              <Route path="/customers" element={customersAllowed ? <Customers /> : <Navigate to="/products" />} />
+              <Route path="/suppliers" element={suppliersAllowed ? <Suppliers /> : <Navigate to="/products" />} />
+              <Route path="/purchases" element={purchasesAllowed ? <Purchases /> : <Navigate to="/products" />} />
               <Route path="*" element={<Navigate to="/dashboard" />} />
             </Routes>
           )}

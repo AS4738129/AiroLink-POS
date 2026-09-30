@@ -4,6 +4,34 @@ All notable project development milestones are recorded here.
 
 ---
 
+# 2026-09-30 (Phase 4: Customers, Suppliers, Purchases + POS margin/tax)
+
+## Database (`0007_phase4_suppliers_purchases.sql`, additive)
+- `suppliers` (org-scoped contact master: name, contact_person, phone, email, address, is_active; `unique(id,org_id)` for tenant-safe FKs) with RLS (select: member; insert/update: owner/manager/inventory_officer/super_admin; no DELETE — deactivation only, same model as products).
+- `purchases` (org + branch + supplier via composite FKs, `ref_no` unique/org from row-locked `org_counters` as `PO-YYMMDD-NNNNN`, status `draft/received/cancelled`, server-computed total, note, received_at) and `purchase_items` (product, qty>0, unit_cost≥0, line_total; unique(purchase,product); composite FKs). Both SELECT-only branch-aware RLS (items inherit branch via parent purchase, same model as sale_items); no client write policies — all writes go through the RPCs, same model as sales.
+- `create_draft_purchase()` — atomic header+lines with server-computed totals; validates role, branch, active org supplier, active org products, qty/cost, no duplicate lines. Drafting never moves stock and needs no entitlement (paperwork is never trapped by a lapsed subscription).
+- `receive_purchase()` — draft→received only; checks role + `is_org_entitled()` + branch access; writes `purchase` ledger entries (the existing `apply_inventory()` trigger moves branch stock; the `inv_ins` reason allowlist already excludes `purchase` so only this RPC can write it), stamps last-purchase-price onto `products.cost_price`, audits. A received purchase is immutable (like a completed sale).
+- `cancel_purchase()` — draft→cancelled only, audited.
+- Costing model: last-purchase-price on `products.cost_price`; historical accuracy needs NO sales-schema change because `sale_items.cost_price` snapshots and `sales.tax_total` are already persisted per sale.
+- Anonymous EXECUTE denied on all three RPCs (consistent with `0005`).
+
+## Frontend
+- `Customers.tsx` (`/customers`): search, status filter, pagination, create/edit/deactivate, detail dialog with balance + credit limit (balance shown read-only — it only changes via the sales/void ledger). Reuses the existing `customers` table, preserving `credit_limit`/`balance`.
+- `Suppliers.tsx` (`/suppliers`): search, status filter, pagination, create/edit/deactivate, detail dialog with contact info.
+- `Purchases.tsx` (`/purchases`): supplier + receiving-branch + product lines (unit cost prefilled from current product cost, editable), live line/total preview, save-as-draft, history with ref/branch/supplier/status filters, detail dialog with receive/cancel actions for drafts. Receiving invalidates stock/cost queries (`branch_inventory`, `pos-stock`, `inv-history`, `products`, `inv-products`, `pos-search`).
+- `Pos.tsx`: cart shows per-line cost + profit/margin and a cart Cost/Profit/Margin summary ONLY for roles with `viewMargin` (super_admin/owner/manager/accountant — never cashier/inventory_officer); totals block now reads Subtotal / Discount / Tax rate / Tax amount / Total. The sale itself is unchanged (server-authoritative `complete_sale()`).
+- `lib/margin.ts` (pure, tested): `lineProfit`, `lineMarginPct`, `cartMargin` — zero/null-price safe, no division by zero.
+- Nav/routes/permissions for customers/suppliers/purchases; dashboard quick actions extended. Query roots `suppliers`/`purchases`/`purchase` registered in `queryScope.ts` (key-convention test kept green).
+
+## Tests
+- `db.test.mjs`: +44 assertions (customer/supplier CRUD + isolation + role gates; draft atomicity/validation/cross-tenant rejection; server-computed totals; draft moves no stock; direct-write bypass rejected; receive moves the right branch only, stamps cost, keeps old sale snapshots, audits, immutable after; cancel flow; branch-scoped visibility; suspended-subscription receive block with drafting still allowed).
+- Vitest: `margin.test.ts` (10) + `permissions.test.ts` (+3) — margin math, zero-price safety, role visibility.
+
+## Deferred / limitations (unchanged)
+- No supplier balances/settlement, no purchase editing after receive, no Phase 5 reports/expenses, no Phase 6 admin UI.
+
+---
+
 # 2026-09-29 (Phase 3 hardening: bug fixes + automatic SKU)
 
 ## POS/Sales runtime bug fixes

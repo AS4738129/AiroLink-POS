@@ -130,6 +130,9 @@ export default function Dashboard() {
     allowed('products', org?.role) && { to: '/products', title: 'Products', desc: 'Browse and manage the catalogue', enabled: true },
     allowed('inventory', org?.role) && { to: '/inventory', title: 'Inventory', desc: 'Stock levels and adjustments', enabled: true },
     allowed('salesHistory', org?.role) && { to: '/sales', title: 'Sales', desc: 'History, reprints and voids', enabled: true },
+    allowed('customers', org?.role) && { to: '/customers', title: 'Customers', desc: 'Directory and credit balances', enabled: true },
+    allowed('suppliers', org?.role) && { to: '/suppliers', title: 'Suppliers', desc: 'Supplier directory and contacts', enabled: true },
+    allowed('purchases', org?.role) && { to: '/purchases', title: 'Purchases', desc: 'Orders, receiving and history', enabled: true },
   ].filter((a): a is { to: string; title: string; desc: string; enabled: boolean } => !!a)
 
   return (

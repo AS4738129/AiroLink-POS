@@ -6,7 +6,7 @@ await db.exec(`create schema auth; create table auth.users(id uuid primary key d
 create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.sub',true),'')::uuid $$;
 create role anon; create role authenticated; grant usage on schema public, auth to anon, authenticated;`)
 
-for (const file of ['0001_core.sql', '0002_phase1_foundation.sql', '0003_phase2_products_inventory.sql', '0004_phase3_pos_sales.sql', '0005_restrict_helper_execute.sql', '0006_auto_sku.sql']) {
+for (const file of ['0001_core.sql', '0002_phase1_foundation.sql', '0003_phase2_products_inventory.sql', '0004_phase3_pos_sales.sql', '0005_restrict_helper_execute.sql', '0006_auto_sku.sql', '0007_phase4_suppliers_purchases.sql']) {
   let sql = readFileSync(new URL(`../migrations/${file}`, import.meta.url), 'utf8')
   if (file === '0001_core.sql') sql = sql.replace('create extension if not exists pgcrypto;', '')
   await db.exec(sql)
@@ -219,6 +219,7 @@ const asAnon = async (fn) => { await db.exec(`set role anon`); try { return awai
 for (const [fnName, call] of [['is_org_entitled', `select is_org_entitled('${oa}')`], ['role_in', `select role_in('${oa}')`], ['can_access_branch', `select can_access_branch('${branchA}')`], ['branch_visible', `select branch_visible('${oa}','${branchA}')`]])
   ok(`anonymous callers cannot execute ${fnName}()`, /permission denied/.test(await rej(asAnon(() => db.query(call))) || ''))
 ok('anonymous callers cannot execute complete_sale() or void_sale()', /permission denied/.test(await rej(asAnon(() => db.query(`select complete_sale('${oa}','${branchA}','[]'::jsonb,'[]'::jsonb)`))) || '') && /permission denied/.test(await rej(asAnon(() => db.query(`select void_sale('${oa}','${sale2Id}')`))) || ''))
+ok('anonymous callers cannot execute the purchase RPCs', /permission denied/.test(await rej(asAnon(() => db.query(`select create_draft_purchase('${oa}','${branchA}','${sale2Id}','x','[]'::jsonb)`))) || '') && /permission denied/.test(await rej(asAnon(() => db.query(`select receive_purchase('${oa}','${sale2Id}')`))) || '') && /permission denied/.test(await rej(asAnon(() => db.query(`select cancel_purchase('${oa}','${sale2Id}')`))) || ''))
 ok('signed-in users can still execute the helpers (RLS keeps working)', (await as(a, () => db.query(`select is_org_entitled('${oa}') e`))).rows[0].e === true)
 
 // seed_demo.sql must run against the migrated schema (it broke when stock moved to branch_inventory)
@@ -293,7 +294,7 @@ const legacyOrg = (await as2(legacyUser, () => db2.query(`select create_organiza
 const legacyProduct = (await as2(legacyUser, () => db2.query(`insert into products(org_id,sku,name,cost_price,selling_price,min_stock) values ('${legacyOrg}','L1','Legacy Item',10,50,3) returning id`))).rows[0].id
 await as2(legacyUser, () => db2.query(`insert into inventory_transactions(org_id,product_id,qty_change,reason) values ('${legacyOrg}','${legacyProduct}',20,'opening')`))
 await as2(legacyUser, () => db2.query(`select complete_sale($1,$2::jsonb,$3::jsonb)`, [legacyOrg, JSON.stringify([{ product_id: legacyProduct, qty: 2 }]), JSON.stringify([{ method: 'cash', amount: 100 }])]))
-for (const file of ['0002_phase1_foundation.sql', '0003_phase2_products_inventory.sql', '0004_phase3_pos_sales.sql', '0005_restrict_helper_execute.sql', '0006_auto_sku.sql'])
+for (const file of ['0002_phase1_foundation.sql', '0003_phase2_products_inventory.sql', '0004_phase3_pos_sales.sql', '0005_restrict_helper_execute.sql', '0006_auto_sku.sql', '0007_phase4_suppliers_purchases.sql'])
   await db2.exec(readFileSync(new URL(`../migrations/${file}`, import.meta.url), 'utf8'))
 await db2.exec(`grant select,insert,update,delete on all tables in schema public to authenticated;`)  // covers tables created by later migrations (e.g. branch_inventory)
 ok('[regression] an organization that pre-dates branches/subscriptions gets a main branch on upgrade', (await db2.query(`select count(*) c from branches where org_id='${legacyOrg}' and is_main`)).rows[0].c == 1)
@@ -307,6 +308,92 @@ ok('[regression] the Pos.tsx branch_inventory query shape now succeeds for the u
 const checkoutErr = await rej(as2(legacyUser, () => db2.query(`select complete_sale($1,$2,$3::jsonb,$4::jsonb)`, [legacyOrg, legacyBranch, JSON.stringify([{ product_id: legacyProduct, qty: 1 }]), JSON.stringify([{ method: 'cash', amount: 50 }])])))
 ok('[regression] the upgraded organization can still check out (POS remains usable after upgrade)', !checkoutErr)
 ok('[regression] a completely fresh organization (created after all migrations) is unaffected by the backfill', (await db.query(`select is_org_entitled('${oa}') e`)).rows[0].e === true)
+
+// ── Phase 4: customers, suppliers, purchases ───────────────────────────────
+const custA = (await as(a, () => db.query(`insert into customers(org_id,name,phone,credit_limit) values ('${oa}','Phase4 Customer','0240000001',500) returning id`))).rows[0].id
+ok('owner can create a customer with contact details', !!(await db.query(`select id from customers where id='${custA}' and phone='0240000001' and credit_limit=500`)).rows[0])
+await as(a, () => db.query(`update customers set email='c4@example.com', address='Accra' where id='${custA}'`))
+ok('owner can edit a customer', (await db.query(`select email from customers where id='${custA}'`)).rows[0].email === 'c4@example.com')
+ok('org B cannot see org A customers', (await as(b, () => db.query(`select count(*) c from customers where id='${custA}'`))).rows[0].c == 0)
+ok('user B cannot create a customer in org A', !!(await rej(as(b, () => db.query(`insert into customers(org_id,name) values ('${oa}','Rogue')`)))))
+await as(d, () => db.query(`insert into customers(org_id,name) values ('${oa}','Cashier Customer')`))
+ok('cashier can create a customer (operational role)', (await db.query(`select count(*) c from customers where org_id='${oa}' and name='Cashier Customer'`)).rows[0].c == 1)
+ok('inventory officer cannot create a customer (not a sales role)', !!(await rej(as(c, () => db.query(`insert into customers(org_id,name) values ('${oa}','Nope')`)))))
+
+const supA = (await as(a, () => db.query(`insert into suppliers(org_id,name,contact_person,phone,email,address) values ('${oa}','Phase4 Supplier','Ama','0240000002','sup@example.com','Kumasi') returning id`))).rows[0].id
+ok('owner can create a supplier with contact details', !!(await db.query(`select id from suppliers where id='${supA}'`)).rows[0])
+await as(a, () => db.query(`update suppliers set phone='0240000003' where id='${supA}'`))
+ok('owner can edit a supplier', (await db.query(`select phone from suppliers where id='${supA}'`)).rows[0].phone === '0240000003')
+ok('org B cannot see org A suppliers', (await as(b, () => db.query(`select count(*) c from suppliers where id='${supA}'`))).rows[0].c == 0)
+ok('user B cannot create a supplier in org A', !!(await rej(as(b, () => db.query(`insert into suppliers(org_id,name) values ('${oa}','Rogue')`)))))
+ok('cashier cannot create a supplier (purchasing role required)', !!(await rej(as(d, () => db.query(`insert into suppliers(org_id,name) values ('${oa}','Nope')`)))))
+await as(c, () => db.query(`insert into suppliers(org_id,name) values ('${oa}','Officer Supplier')`))
+ok('inventory officer can create a supplier', (await db.query(`select count(*) c from suppliers where org_id='${oa}' and name='Officer Supplier'`)).rows[0].c == 1)
+const supB = (await as(b, () => db.query(`insert into suppliers(org_id,name) values ('${ob}','Org B Supplier') returning id`))).rows[0].id
+
+const draft = (u, org, branch, sup, note, items) => as(u, () => db.query(`select create_draft_purchase($1,$2,$3,$4,$5::jsonb) id`, [org, branch, sup, note, JSON.stringify(items)]))
+const purCount = async () => Number((await db.query(`select count(*) c from purchases where org_id='${oa}'`)).rows[0].c)
+const beforePur = await purCount()
+ok('draft with an unknown product is rejected atomically (no partial purchase)', /Product unavailable/.test(await rej(draft(a, oa, branchA, supA, null, [{ product_id: pid2, qty: 1, unit_cost: 70 }, { product_id: '00000000-0000-0000-0000-000000000000', qty: 1, unit_cost: 1 }])) || '') && await purCount() === beforePur)
+ok('draft with a duplicate product line is rejected', /Duplicate product/.test(await rej(draft(a, oa, branchA, supA, null, [{ product_id: pid2, qty: 1, unit_cost: 70 }, { product_id: pid2, qty: 1, unit_cost: 70 }])) || '') && await purCount() === beforePur)
+ok('draft with invalid quantity or unit cost is rejected', /Invalid quantity/.test(await rej(draft(a, oa, branchA, supA, null, [{ product_id: pid2, qty: 0, unit_cost: 70 }])) || '') && /Invalid unit cost/.test(await rej(draft(a, oa, branchA, supA, null, [{ product_id: pid2, qty: 1, unit_cost: -1 }])) || '') && await purCount() === beforePur)
+ok('draft with no lines is rejected', /at least one product/.test(await rej(draft(a, oa, branchA, supA, null, [])) || ''))
+ok('cross-tenant supplier rejected (org B supplier in org A purchase)', /Supplier not found/.test(await rej(draft(a, oa, branchA, supB, 'x', [{ product_id: pid2, qty: 1, unit_cost: 70 }])) || ''))
+ok('cross-tenant product rejected (org B product in org A purchase)', /Product unavailable/.test(await rej(draft(a, oa, branchA, supA, null, [{ product_id: pidB, qty: 1, unit_cost: 5 }])) || ''))
+ok("another org's branch rejected", /Invalid branch/.test(await rej(draft(a, oa, branchB, supA, null, [{ product_id: pid2, qty: 1, unit_cost: 70 }])) || ''))
+ok('user B cannot draft a purchase in org A', /Not authorized/.test(await rej(draft(b, oa, branchA, supA, null, [{ product_id: pid2, qty: 1, unit_cost: 70 }])) || ''))
+ok('cashier cannot draft a purchase (purchasing role required)', /Not authorized/.test(await rej(draft(d, oa, branchA2, supA, null, [{ product_id: pid, qty: 1, unit_cost: 10 }])) || ''))
+ok('branch-scoped officer cannot draft at an unassigned branch', /No access to this branch/.test(await rej(draft(c, oa, branchA, supA, null, [{ product_id: pid, qty: 1, unit_cost: 10 }])) || ''))
+
+const stockBefore = await stockAt(branchA, pid2)
+const stockBefore3 = await stockAt(branchA, pid3)
+const purId = (await draft(a, oa, branchA, supA, 'first order', [{ product_id: pid2, qty: 2, unit_cost: 70 }, { product_id: pid3, qty: 1, unit_cost: 25 }])).rows[0].id
+const purRow = (await db.query(`select ref_no,status,total,branch_id,supplier_id from purchases where id='${purId}'`)).rows[0]
+ok('draft stores server-computed total (2x70 + 1x25 = 165)', purRow.status === 'draft' && Number(purRow.total) === 165 && purRow.branch_id === branchA && purRow.supplier_id === supA && purRow.ref_no.startsWith('PO-'))
+ok('draft stores line totals per product', (await db.query(`select product_id,qty,unit_cost,line_total from purchase_items where purchase_id='${purId}' order by product_id`)).rows.every((x) => Number(x.qty) * Number(x.unit_cost) === Number(x.line_total)))
+ok('draft reference numbers are unique within the organization', (await db.query(`select count(*) c, count(distinct ref_no) d from purchases where org_id='${oa}'`)).rows.every((x) => x.c === x.d))
+ok('drafting a purchase does not move stock', await stockAt(branchA, pid2) === stockBefore && await stockAt(branchA, pid3) === stockBefore3)
+ok('client cannot insert purchases directly, bypassing the RPC', !!(await rej(as(a, () => db.query(`insert into purchases(org_id,branch_id,supplier_id,ref_no) values ('${oa}','${branchA}','${supA}','HACK-1')`)))))
+ok('client cannot insert purchase_items directly, bypassing the RPC', !!(await rej(as(a, () => db.query(`insert into purchase_items(org_id,purchase_id,product_id,qty,unit_cost,line_total) values ('${oa}','${purId}','${pid2}',1,1,1)`)))))
+ok('client cannot write a purchase ledger entry directly (reason allowlist)', /row-level security|policy/.test(await rej(as(a, () => db.query(`insert into inventory_transactions(org_id,branch_id,product_id,qty_change,reason) values ('${oa}','${branchA}','${pid2}',5,'purchase')`))) || ''))
+
+const oldSnapshot = Number((await db.query(`select cost_price from sale_items where sale_id='${sale2Id}'`)).rows[0].cost_price)
+const refNo = (await as(a, () => db.query(`select receive_purchase($1,$2) r`, [oa, purId]))).rows[0].r
+ok('receive returns the purchase reference', refNo === purRow.ref_no)
+ok('receiving increases the receiving branch stock only', await stockAt(branchA, pid2) === stockBefore + 2 && await stockAt(branchA, pid3) === stockBefore3 + 1 && await stockAt(branchA2) === 19)
+ok('receiving marks the purchase received with a timestamp', (await db.query(`select status,received_at from purchases where id='${purId}'`)).rows.every((x) => x.status === 'received' && x.received_at !== null))
+ok('receiving stamps last-purchase-price onto product cost', Number((await db.query(`select cost_price from products where id='${pid2}'`)).rows[0].cost_price) === 70 && Number((await db.query(`select cost_price from products where id='${pid3}'`)).rows[0].cost_price) === 25)
+ok('an earlier sale keeps its original cost snapshot after the cost changes (historical margin stays accurate)', Number((await db.query(`select cost_price from sale_items where sale_id='${sale2Id}'`)).rows[0].cost_price) === oldSnapshot)
+ok('receiving wrote branch-tagged purchase ledger entries referencing the purchase', (await db.query(`select count(*) c from inventory_transactions where reason='purchase' and ref_id='${purId}' and branch_id='${branchA}'`)).rows[0].c == 2)
+ok('receiving is audited', (await db.query(`select count(*) c from audit_logs where entity_id='${purId}' and action='purchase.receive'`)).rows[0].c == 1)
+ok('a received purchase cannot be received again', /Only a draft/.test(await rej(as(a, () => db.query(`select receive_purchase($1,$2)`, [oa, purId]))) || ''))
+ok('a received purchase cannot be cancelled (immutable, like a completed sale)', /Only a draft/.test(await rej(as(a, () => db.query(`select cancel_purchase($1,$2)`, [oa, purId]))) || ''))
+
+const cancelId = (await draft(a, oa, branchA, supA, null, [{ product_id: pid2, qty: 1, unit_cost: 70 }])).rows[0].id
+await as(a, () => db.query(`select cancel_purchase($1,$2,$3)`, [oa, cancelId, 'ordered twice']))
+ok('a draft purchase can be cancelled with stock untouched', (await db.query(`select status from purchases where id='${cancelId}'`)).rows[0].status === 'cancelled' && await stockAt(branchA, pid2) === stockBefore + 2)
+ok('a cancelled purchase cannot be received', /Only a draft/.test(await rej(as(a, () => db.query(`select receive_purchase($1,$2)`, [oa, cancelId]))) || ''))
+ok('user B cannot cancel org A drafts', /Not authorized|Purchase not found/.test(await rej(as(b, () => db.query(`select cancel_purchase($1,$2)`, [oa, cancelId]))) || ''))
+
+const scopedDraft = (await draft(c, oa, branchA2, supA, null, [{ product_id: pid, qty: 1, unit_cost: 10 }])).rows[0].id
+ok('branch-scoped officer can draft at their assigned branch', !!(await db.query(`select id from purchases where id='${scopedDraft}'`)).rows[0])
+ok('branch-scoped user sees purchases at their branch only', (await as(c, () => db.query(`select count(*) n from purchases where branch_id='${branchA2}'`))).rows[0].n >= 1 && (await as(c, () => db.query(`select count(*) n from purchases where branch_id='${branchA}'`))).rows[0].n == 0)
+ok('branch-scoped user cannot see purchase items at an unassigned branch', (await as(c, () => db.query(`select count(*) n from purchase_items where purchase_id='${purId}'`))).rows[0].n == 0)
+// NOTE: purId is already 'received' here, so a fresh draft is needed — the status check
+// runs before the branch check, and a received purchase would fail with 'Only a draft'.
+const unassignedDraft = (await draft(a, oa, branchA, supA, null, [{ product_id: pid2, qty: 1, unit_cost: 70 }])).rows[0].id
+ok('branch-scoped officer cannot receive at an unassigned branch', /No access to this branch/.test(await rej(as(c, () => db.query(`select receive_purchase($1,$2)`, [oa, unassignedDraft]))) || ''))
+await as(a, () => db.query(`select cancel_purchase($1,$2)`, [oa, unassignedDraft]))
+ok('org B sees none of org A purchases or items', (await as(b, () => db.query(`select (select count(*) from purchases where org_id='${oa}')+(select count(*) from purchase_items where org_id='${oa}') n`))).rows[0].n == 0)
+await as(a, () => db.query(`select cancel_purchase($1,$2)`, [oa, scopedDraft]))
+
+await db.exec(`update subscriptions set status='suspended' where org_id='${oa}'`)
+const suspDraft = (await draft(a, oa, branchA, supA, null, [{ product_id: pid2, qty: 1, unit_cost: 70 }])).rows[0].id
+ok('drafting still works while the subscription is suspended (paperwork is never trapped)', (await db.query(`select status from purchases where id='${suspDraft}'`)).rows[0].status === 'draft')
+ok('receiving is blocked while the subscription is suspended, stock untouched', /Subscription is not active/.test(await rej(as(a, () => db.query(`select receive_purchase($1,$2)`, [oa, suspDraft]))) || '') && await stockAt(branchA, pid2) === stockBefore + 2)
+await db.exec(`update subscriptions set status='trialing' where org_id='${oa}'`)
+await as(a, () => db.query(`select receive_purchase($1,$2)`, [oa, suspDraft]))
+ok('receiving works again once the subscription is reactivated', (await db.query(`select status from purchases where id='${suspDraft}'`)).rows[0].status === 'received' && await stockAt(branchA, pid2) === stockBefore + 3)
 
 if (failures > 0) { console.log(`\n${failures} test(s) FAILED`); process.exit(1) }
 console.log('\nAll tests passed')

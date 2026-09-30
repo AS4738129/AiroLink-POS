@@ -10,6 +10,15 @@ export const access = {
   inventory: ['super_admin', 'owner', 'manager', 'inventory_officer', 'accountant'],
   salesHistory: ['super_admin', 'owner', 'manager', 'cashier', 'accountant'],
   voidSales: ['super_admin', 'owner', 'manager'],
+  customers: ['super_admin', 'owner', 'manager', 'cashier', 'accountant'],
+  editCustomers: ['super_admin', 'owner', 'manager', 'cashier'],
+  suppliers: ['super_admin', 'owner', 'manager', 'inventory_officer', 'accountant'],
+  editSuppliers: ['super_admin', 'owner', 'manager', 'inventory_officer'],
+  purchases: ['super_admin', 'owner', 'manager', 'inventory_officer', 'accountant'],
+  editPurchases: ['super_admin', 'owner', 'manager', 'inventory_officer'],
+  // Cost/profit visibility: never shown to cashiers or inventory officers.
+  // The POS sale itself is unaffected — this only gates the margin display.
+  viewMargin: ['super_admin', 'owner', 'manager', 'accountant'],
   adjustInventory: ['super_admin', 'owner', 'manager', 'inventory_officer'],
 } as Record<string, Role[]>
 export const allowed = (feature: string, role?: Role) => !!role && !!access[feature]?.includes(role)

@@ -4,7 +4,9 @@ import { z } from 'zod'
 import { supabase, friendly } from '../lib/supabase'
 import { errorDetail } from '../lib/errors'
 import { useAuth } from '../features/auth/AuthProvider'
+import { allowed } from '../lib/permissions'
 import { cartTotals, r2 } from '../lib/calc'
+import { cartMargin, lineMarginPct, lineProfit } from '../lib/margin'
 import { METHODS, paymentSummary, paymentsPayload, type Method, type PayLine } from '../lib/payments'
 import { addToCart, setQuantity, removeLine, type CartLine } from '../lib/cart'
 import { ReceiptDialog } from '../components/ReceiptDialog'
@@ -13,9 +15,9 @@ import {
   TableShell, inputCls, rowCls, selectCls, tdCls, thCls,
 } from '../components/ui'
 
-type P = { id: string; name: string; sku: string; barcode: string | null; selling_price: number; taxable: boolean; categories: { name: string } | null }
+type P = { id: string; name: string; sku: string; barcode: string | null; selling_price: number; cost_price: number; taxable: boolean; categories: { name: string } | null }
 type Stocked = P & { stock_qty: number }
-const PRODUCT_COLS = 'id,name,sku,barcode,selling_price,taxable,categories(name)'
+const PRODUCT_COLS = 'id,name,sku,barcode,selling_price,cost_price,taxable,categories(name)'
 // Frontend validation is UX only; complete_sale() re-validates everything.
 const checkoutSchema = z.object({ discount: z.number().min(0, 'Discount cannot be negative'), lines: z.array(z.object({ amount: z.number().positive('Payment amounts must be greater than zero') })) })
 const useDebounced = <T,>(v: T, ms = 250) => { const [d, setD] = useState(v); useEffect(() => { const t = setTimeout(() => setD(v), ms); return () => clearTimeout(t) }, [v, ms]); return d }
@@ -63,6 +65,9 @@ export default function Pos() {
     if (data) { add(withStock(data as unknown as P)); setQ('') } else setMsg({ ok: false, t: `No active product with barcode ${code}.` }) }
 
   const t = cartTotals(cart.map((l) => ({ price: Number(l.selling_price), qty: l.qty, taxable: l.taxable })), discount, org!.taxRate)
+  // Margin preview only (never sent to the server): cost/profit stay hidden unless the role may see them.
+  const showMargin = allowed('viewMargin', org?.role)
+  const m = cartMargin(cart.map((l) => ({ cost: Number(l.cost_price), price: Number(l.selling_price), qty: l.qty })), discount)
   const payLines: PayLine[] = lines.map((l) => ({ method: l.method, amount: r2(Number(l.amount) || 0) }))
   const sum = paymentSummary(payLines, t.total, Number(cashReceived) || 0)
   const needsCustomer = sum.remaining > 0 && cart.length > 0
@@ -158,14 +163,18 @@ export default function Pos() {
             ) : (
               <TableShell label="Cart">
                 <thead>
-                  <tr><th className={thCls}>Product</th><th className={thCls}>Qty</th><th className={`${thCls} text-right`}>Total</th><th className={thCls}><span className="sr-only">Remove</span></th></tr>
+                  <tr><th className={thCls}>Product</th><th className={thCls}>Qty</th><th className={`${thCls} text-right`}>Total</th>{showMargin && <th className={`${thCls} text-right`}>Margin</th>}<th className={thCls}><span className="sr-only">Remove</span></th></tr>
                 </thead>
                 <tbody>
-                  {cart.map((l) => (
+                  {cart.map((l) => {
+                    const lp = lineProfit({ cost: Number(l.cost_price), price: Number(l.selling_price), qty: l.qty })
+                    const lm = lineMarginPct({ cost: Number(l.cost_price), price: Number(l.selling_price), qty: l.qty })
+                    return (
                     <tr key={l.id} className={rowCls}>
                       <td className={`${tdCls} max-w-[9rem]`}>
                         <span className="block truncate font-medium">{l.name}</span>
                         <span className="block text-xs text-slate-500">{Number(l.selling_price).toFixed(2)} each</span>
+                        {showMargin && <span className="block text-xs text-slate-500">Cost {Number(l.cost_price).toFixed(2)}</span>}
                       </td>
                       <td className={tdCls}>
                         <div className="flex items-center gap-1">
@@ -175,9 +184,15 @@ export default function Pos() {
                         </div>
                       </td>
                       <td className={`${tdCls} text-right font-medium`}>{r2(Number(l.selling_price) * l.qty).toFixed(2)}</td>
+                      {showMargin && (
+                        <td className={`${tdCls} text-right text-xs`}>
+                          <span className={`block font-medium ${lp < 0 ? 'text-red-700' : 'text-emerald-700'}`}>{lp.toFixed(2)} ({lm.toFixed(1)}%)</span>
+                        </td>
+                      )}
                       <td className={tdCls}><button aria-label={`Remove ${l.name}`} className="rounded px-1.5 py-1 text-red-700 hover:bg-red-50" onClick={() => remove(l.id)}>✕</button></td>
                     </tr>
-                  ))}
+                    )
+                  })}
                 </tbody>
               </TableShell>
             )}
@@ -187,8 +202,16 @@ export default function Pos() {
             <dl className="space-y-1 rounded-xl border border-brand-100 bg-brand-50/50 p-3 text-sm">
               <div className="flex justify-between"><dt className="text-slate-500">Subtotal</dt><dd className="font-medium">{money(t.subtotal)}</dd></div>
               <div className="flex justify-between"><dt className="text-slate-500">Discount</dt><dd className="font-medium">−{money(t.discount)}</dd></div>
-              <div className="flex justify-between"><dt className="text-slate-500">Tax ({org!.taxRate}%)</dt><dd className="font-medium">{money(t.tax)}</dd></div>
+              <div className="flex justify-between"><dt className="text-slate-500">Tax rate</dt><dd className="font-medium">{org!.taxRate}%</dd></div>
+              <div className="flex justify-between"><dt className="text-slate-500">Tax amount</dt><dd className="font-medium">{money(t.tax)}</dd></div>
               <div className="flex justify-between border-t border-brand-100 pt-1 text-lg font-extrabold text-ink-900"><dt>Total</dt><dd>{money(t.total)}</dd></div>
+              {showMargin && cart.length > 0 && (
+                <>
+                  <div className="flex justify-between border-t border-brand-100 pt-1"><dt className="text-slate-500">Cost</dt><dd className="font-medium">{money(m.cost)}</dd></div>
+                  <div className="flex justify-between"><dt className="text-slate-500">Profit</dt><dd className={`font-semibold ${m.profit < 0 ? 'text-red-700' : 'text-emerald-700'}`}>{money(m.profit)}</dd></div>
+                  <div className="flex justify-between"><dt className="text-slate-500">Margin</dt><dd className="font-semibold">{m.marginPct.toFixed(1)}%</dd></div>
+                </>
+              )}
             </dl>
             <Field label="Customer">
               <select value={customer} onChange={(e) => setCustomer(e.target.value)} className={selectCls + ' w-full'}>
