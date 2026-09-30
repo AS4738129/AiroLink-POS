@@ -1,5 +1,13 @@
-import { it, expect } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { allowed } from './permissions'
+describe('dashboard navigation', () => {
+  it('is visible to every application role and grants no data access by itself', () => {
+    for (const r of ['super_admin', 'owner', 'manager', 'cashier', 'inventory_officer', 'accountant'] as const) {
+      expect(allowed('dashboard', r)).toBe(true)
+    }
+    expect(allowed('dashboard', undefined)).toBe(false)
+  })
+})
 it('cashier can sell but not edit products', () => { expect(allowed('pos', 'cashier')).toBe(true); expect(allowed('editProducts', 'cashier')).toBe(false) })
 it('inventory officer cannot sell', () => expect(allowed('pos', 'inventory_officer')).toBe(false))
 it('sales history is visible to operational and accounting roles but not inventory officers', () => {

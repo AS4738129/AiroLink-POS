@@ -5,6 +5,7 @@ import { useAuth } from './features/auth/AuthProvider'
 import { allowed } from './lib/permissions'
 import Login from './pages/Login'
 import Onboarding from './pages/Onboarding'
+import Dashboard from './pages/Dashboard'
 import Pos from './pages/Pos'
 import Products from './pages/Products'
 import Inventory from './pages/Inventory'
@@ -22,6 +23,7 @@ export default function App() {
 }
 
 const NAV = [
+  { to: '/dashboard', label: 'Dashboard', feature: 'dashboard' },
   { to: '/pos', label: 'POS', feature: 'pos' },
   { to: '/products', label: 'Products', feature: 'products' },
   { to: '/inventory', label: 'Inventory', feature: 'inventory' },
@@ -195,6 +197,7 @@ function AppShell() {
             </div>
           ) : (
             <Routes key={org.id}>
+              <Route path="/dashboard" element={<Dashboard key={branch?.id ?? 'none'} />} />
               <Route path="/pos" element={posAllowed ? <Pos key={branch?.id ?? 'none'} /> : <Navigate to="/products" />} />
               <Route path="/products" element={<Products />} />
               <Route
@@ -202,7 +205,7 @@ function AppShell() {
                 element={inventoryAllowed ? <Inventory key={branch?.id ?? 'none'} /> : <Navigate to="/products" />}
               />
               <Route path="/sales" element={salesAllowed ? <Sales /> : <Navigate to="/products" />} />
-              <Route path="*" element={<Navigate to={posAllowed ? '/pos' : '/products'} />} />
+              <Route path="*" element={<Navigate to="/dashboard" />} />
             </Routes>
           )}
         </main>
