@@ -52,6 +52,35 @@ export function PageHeader({
   )
 }
 
+// Shared sea-blue page canvas: the visual treatment Dashboard introduced,
+// reused by every sidebar menu page so the app has one consistent canvas.
+// Content (cards/tables/forms/POS panels) stays on white/light surfaces.
+// Negative margins bleed into the shell <main> padding so the theme fills the page.
+export const pageCanvasCls =
+  '-m-4 space-y-4 bg-gradient-to-b from-ink-900 via-brand-800 to-brand-700 p-4 sm:-m-6 sm:space-y-5 sm:p-6'
+
+// PageHeader rendered on the sea-blue canvas: white title + soft sky description
+// for contrast. Business content itself stays on light surfaces.
+export function PageHeaderOnDark({
+  title,
+  description,
+  actions,
+}: {
+  title: string
+  description?: string
+  actions?: ReactNode
+}) {
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="min-w-0">
+        <h1 className="text-xl font-bold tracking-tight text-white sm:text-2xl">{title}</h1>
+        {description && <p className="mt-0.5 max-w-2xl text-sm text-sky-100/85">{description}</p>}
+      </div>
+      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+    </div>
+  )
+}
+
 export function Card({ children, className = '' }: { children: ReactNode; className?: string }) {
   return (
     <div className={`rounded-xl border border-brand-100 bg-white shadow-[0_1px_2px_rgba(11,37,69,0.05),0_8px_24px_-12px_rgba(28,109,217,0.18)] ${className}`}>{children}</div>

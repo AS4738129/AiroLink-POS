@@ -7,8 +7,8 @@ import { allowed } from '../lib/permissions'
 import { METHODS } from '../lib/payments'
 import { ReceiptDialog } from '../components/ReceiptDialog'
 import {
-  Btn, EmptyState, Notice, PageHeader, Spinner, StatusBadge,
-  TableShell, rowCls, selectCls, tdCls, thCls, inputCls, filterBarCls,
+  Btn, EmptyState, Notice, PageHeaderOnDark, Spinner, StatusBadge,
+  TableShell, rowCls, selectCls, tdCls, thCls, inputCls, filterBarCls, pageCanvasCls,
 } from '../components/ui'
 
 const PAGE = 20
@@ -54,8 +54,8 @@ export default function Sales() {
     onError: (e) => setNote({ ok: false, t: friendly(e) }) })
 
   return (
-    <div className="space-y-4">
-      <PageHeader title="Sales" description="Sale history, reprints and voids." />
+    <div className={pageCanvasCls}>
+      <PageHeaderOnDark title="Sales" description="Sale history, reprints and voids." />
       {note && <Notice tone={note.ok ? 'ok' : 'err'}>{note.t}</Notice>}
       <div className={filterBarCls}>
         <input value={receiptQ} onChange={(e) => { setReceiptQ(e.target.value); reset() }} placeholder="Receipt number" aria-label="Receipt number" className={`${inputCls} sm:max-w-[12rem]`} />

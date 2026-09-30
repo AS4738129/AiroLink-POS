@@ -11,8 +11,8 @@ import { METHODS, paymentSummary, paymentsPayload, type Method, type PayLine } f
 import { addToCart, setQuantity, removeLine, type CartLine } from '../lib/cart'
 import { ReceiptDialog } from '../components/ReceiptDialog'
 import {
-  Btn, Card, EmptyState, Field, Notice, PageHeader, Spinner, StatusBadge,
-  TableShell, inputCls, rowCls, selectCls, tdCls, thCls,
+  Btn, Card, EmptyState, Field, Notice, PageHeaderOnDark, Spinner, StatusBadge,
+  TableShell, inputCls, rowCls, selectCls, tdCls, thCls, pageCanvasCls,
 } from '../components/ui'
 
 type P = { id: string; name: string; sku: string; barcode: string | null; selling_price: number; cost_price: number; taxable: boolean; categories: { name: string } | null }
@@ -91,12 +91,12 @@ export default function Pos() {
   const setLine = (i: number, patch: Partial<{ method: Method; amount: string }>) => setLines((ls) => ls.map((l, k) => k === i ? { ...l, ...patch } : l))
 
   return (
-    <div className="space-y-4">
-      <PageHeader
+    <div className={pageCanvasCls}>
+      <PageHeaderOnDark
         title="Point of sale"
         description={branch ? `Selling at ${branch.name}` : 'No authorized branch is available.'}
         actions={branches.length > 1 ? (
-          <label className="text-sm text-slate-600">
+          <label className="text-sm text-sky-100/85">
             Branch{' '}
             <select aria-label="Branch" value={branch?.id ?? ''} onChange={(e) => switchBranch(e.target.value)} className={selectCls}>
               {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}

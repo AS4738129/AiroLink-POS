@@ -5,8 +5,8 @@ import { supabase, friendly } from '../lib/supabase'
 import { useAuth } from '../features/auth/AuthProvider'
 import { allowed } from '../lib/permissions'
 import {
-  Btn, Card, EmptyState, Field, Notice, PageHeader, Spinner, StatusBadge,
-  TableShell, inputCls, rowCls, tdCls, thCls, filterBarCls,
+  Btn, Card, EmptyState, Field, Notice, PageHeaderOnDark, Spinner, StatusBadge,
+  TableShell, inputCls, rowCls, tdCls, thCls, filterBarCls, pageCanvasCls,
 } from '../components/ui'
 
 const PAGE = 20
@@ -81,8 +81,8 @@ export default function Suppliers() {
   const pages = Math.max(1, Math.ceil((list.data?.count ?? 0) / PAGE))
 
   return (
-    <div className="space-y-4">
-      <PageHeader
+    <div className={pageCanvasCls}>
+      <PageHeaderOnDark
         title="Suppliers"
         description="Supplier directory and contact information."
         actions={canEdit ? (

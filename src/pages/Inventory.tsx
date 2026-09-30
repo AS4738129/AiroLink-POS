@@ -4,8 +4,8 @@ import { supabase, friendly } from '../lib/supabase'
 import { useAuth } from '../features/auth/AuthProvider'
 import { allowed } from '../lib/permissions'
 import {
-  Btn, Card, EmptyState, Field, Notice, PageHeader, Spinner, StatusBadge,
-  TableShell, inputCls, rowCls, selectCls, tdCls, thCls, filterBarCls,
+  Btn, Card, EmptyState, Field, Notice, PageHeaderOnDark, Spinner, StatusBadge,
+  TableShell, inputCls, rowCls, selectCls, tdCls, thCls, filterBarCls, pageCanvasCls,
 } from '../components/ui'
 
 type Product = { id: string; sku: string; name: string; is_active: boolean }
@@ -88,8 +88,8 @@ export default function Inventory() {
 
   if (!branch) {
     return (
-      <div className="space-y-4">
-        <PageHeader title="Inventory" description="Branch stock levels and adjustments." />
+      <div className={pageCanvasCls}>
+        <PageHeaderOnDark title="Inventory" description="Branch stock levels and adjustments." />
         <Notice tone="warn">No branch available. Ask an owner to give you branch access.</Notice>
       </div>
     )
@@ -98,12 +98,12 @@ export default function Inventory() {
   const toneOf = (s: string): 'red' | 'amber' | 'green' => s === 'Out' ? 'red' : s === 'Low' ? 'amber' : 'green'
 
   return (
-    <div className="space-y-4">
-      <PageHeader
+    <div className={pageCanvasCls}>
+      <PageHeaderOnDark
         title="Inventory"
         description={branch ? `Stock at ${branch.name} · ${rows.length} products` : 'Branch stock levels and adjustments.'}
         actions={branches.length > 1 ? (
-          <label className="text-sm text-slate-600">
+          <label className="text-sm text-sky-100/85">
             Branch{' '}
             <select value={branch.id} onChange={(e) => switchBranch(e.target.value)} aria-label="Branch" className={selectCls}>
               {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}

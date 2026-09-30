@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { bucketSalesByDay, daysAgo, startOfDay, summarizeSales, type SalePoint } from './dashboard'
+import { bucketByRange, bucketSalesByDay, daysAgo, startOfDay, summarizeRange, summarizeSales, type SalePoint } from './dashboard'
 
 const at = (d: Date, h = 12) => {
   const x = new Date(d)
@@ -27,6 +27,33 @@ describe('summarizeSales', () => {
   })
   it('returns zeros with no sales', () => {
     expect(summarizeSales([], startOfDay())).toEqual({ revenue: 0, count: 0, avg: 0 })
+  })
+})
+
+describe('summarizeRange', () => {
+  it('sums only completed sales inside the half-open window (end-exclusive)', () => {
+    const s = new Date(2026, 8, 28)
+    const e = new Date(2026, 8, 29)
+    const pts: SalePoint[] = [
+      { created_at: new Date(2026, 8, 28, 12).toISOString(), total: 100, status: 'completed' },
+      { created_at: new Date(2026, 8, 29, 0, 0, 0, 0).toISOString(), total: 50, status: 'completed' },
+      { created_at: new Date(2026, 8, 28, 8).toISOString(), total: 999, status: 'void' },
+    ]
+    expect(summarizeRange(pts, s, e)).toEqual({ revenue: 100, count: 1, avg: 100 })
+  })
+})
+
+describe('bucketByRange', () => {
+  it('buckets a multi-day custom range day-by-day with zero-fill', () => {
+    const s = new Date(2026, 8, 1)
+    const e = new Date(2026, 8, 4)
+    const pts: SalePoint[] = [
+      { created_at: new Date(2026, 8, 1, 10).toISOString(), total: 10, status: 'completed' },
+      { created_at: new Date(2026, 8, 3, 10).toISOString(), total: 30, status: 'completed' },
+    ]
+    const buckets = bucketByRange(pts, s, e)
+    expect(buckets).toHaveLength(3)
+    expect(buckets.map((b) => b.total)).toEqual([10, 0, 30])
   })
 })
 

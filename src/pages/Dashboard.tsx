@@ -5,10 +5,12 @@ import { supabase } from '../lib/supabase'
 import { errorDetail } from '../lib/errors'
 import { useAuth } from '../features/auth/AuthProvider'
 import { allowed } from '../lib/permissions'
-import { bucketSalesByDay, daysAgo, startOfDay, summarizeSales } from '../lib/dashboard'
-import { Card, EmptyState, Notice, Spinner, StatusBadge } from '../components/ui'
+import { bucketByRange, summarizeRange, type SalePoint } from '../lib/dashboard'
+import { RANGES, isCustomValid, resolveRange, type CustomRange, type RangeId } from '../lib/dateRange'
+import { Card, EmptyState, Notice, Spinner, StatusBadge, pageCanvasCls, selectCls } from '../components/ui'
 
-type Point = { created_at: string; total: number; status: string }
+type Point = SalePoint & { status: string }
+type PurchasePoint = { created_at: string; total: number | string; status: string }
 type RecentRow = { id: string; receipt_no: string; created_at: string; status: string; total: number; balance_due: number; branch_id: string; customers: { name: string } | null }
 type Product = { id: string; sku: string; name: string }
 type StockRow = { product_id: string; stock_qty: number; min_stock: number }
@@ -18,12 +20,10 @@ const payStatus = (status: string, due: number) => (status === 'void' ? 'Void' :
 const payTone = (status: string, due: number): 'red' | 'amber' | 'green' =>
   (status === 'void' ? 'red' : due > 0 ? 'amber' : 'green')
 
-const PERIODS = [
-  { id: 'today', label: 'Today', days: 1 },
-  { id: 'week', label: 'This Week', days: 7 },
-  { id: 'month', label: 'This Month', days: 30 },
-] as const
-type PeriodId = (typeof PERIODS)[number]['id']
+// Amounts move in cents and are rounded in the DB, but the client parses numeric
+// columns as floats — sum in minor units so 0.1 + 0.2 style rows cannot drift by a pesewa.
+const sumTotals = (rows: { total: number | string }[]) =>
+  Math.round(rows.reduce((s, r) => s + Math.round(Number(r.total) * 100), 0)) / 100
 
 function Kpi({ label, hint, accent, children }: { label: string; hint?: string; accent: string; children: ReactNode }) {
   return (
@@ -50,9 +50,15 @@ function QueryProblem({ error, onRetry, what }: { error: unknown; onRetry: () =>
   )
 }
 
+const todayStr = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 export default function Dashboard() {
   const { session, org, branch, branches, subscription, entitled } = useAuth()
-  const [period, setPeriod] = useState<PeriodId>('week')
+  const [rangeId, setRangeId] = useState<RangeId>('week')
+  const [custom, setCustom] = useState<CustomRange>({ startDate: '', endDate: '' })
   const money = (n: number) => `${org!.currency} ${n.toFixed(2)}`
 
   // Display-only: prefer the sign-up full name, fall back to the account email (same as AppShell).
@@ -62,18 +68,88 @@ export default function Dashboard() {
   const firstName = displayName.split(' ')[0]
 
   const showSales = allowed('salesHistory', org?.role)
+  const showPurchases = allowed('purchases', org?.role)
+  const showTotals = showSales || showPurchases
   const scopeKey = branch?.id ?? 'all'
 
-  // Completed + voided points for the last 30 days at the current branch (voids are
-  // excluded from every total by lib/dashboard). RLS already limits rows to branches
-  // this user may see; the branch filter only narrows further.
-  const points = useQuery({ queryKey: ['sales', org!.id, scopeKey, 'dashboard-30d'], enabled: showSales, queryFn: async () => {
-    let s = supabase.from('sales').select('created_at,total,status').eq('org_id', org!.id).gte('created_at', daysAgo(30).toISOString())
-    if (branch) s = s.eq('branch_id', branch.id)
-    const { data, error } = await s.order('created_at', { ascending: true }).limit(1000)
-    if (error) throw error
-    return (data ?? []) as Point[]
-  } })
+  const range = useMemo(() => resolveRange(rangeId, custom), [rangeId, custom])
+  const customReady = rangeId !== 'custom' || isCustomValid(custom)
+  const rangeKey = range.key
+
+  // Organization-wide totals for the selected range (no branch filter on purpose —
+  // these must cover every branch of the org). RLS still limits rows to branches
+  // this user may see, and org isolation is enforced by the org_id predicate.
+  // Completed = every non-void status (`complete_sale()` only writes 'completed';
+  // 'partial_refund'/'refunded' remain for a future phase). Void rows are fetched
+  // too so the total stays correct even if a sale is voided after the fetch.
+  // staleTime: 0 so returning from Sales/Purchases after a void/receive always refetches.
+  const salesRange = useQuery({ queryKey: ['dashboard-totals', org!.id, 'sales', rangeKey], enabled: showSales && customReady, staleTime: 0,
+    queryFn: async () => {
+      // Paged: a busy org can hold more rows in a range than one response carries.
+      const rows: Point[] = []
+      const PAGE = 1000
+      for (let offset = 0; ; offset += PAGE) {
+        const { data, error } = await supabase
+          .from('sales')
+          .select('created_at,total,status')
+          .eq('org_id', org!.id)
+          .gte('created_at', range.start.toISOString())
+          .lt('created_at', range.end.toISOString())
+          .order('created_at', { ascending: true })
+          .range(offset, offset + PAGE - 1)
+        if (error) throw error
+        rows.push(...((data ?? []) as Point[]))
+        if ((data ?? []).length < PAGE) break
+      }
+      return rows
+    },
+  })
+  // Received purchases only: drafts are plans, cancelled are dead — neither is spend.
+  const purchasesRange = useQuery({ queryKey: ['dashboard-totals', org!.id, 'purchases', rangeKey], enabled: showPurchases && customReady, staleTime: 0,
+    queryFn: async () => {
+      // Paged: a busy org can hold more rows in a range than one response carries.
+      const rows: PurchasePoint[] = []
+      const PAGE = 1000
+      for (let offset = 0; ; offset += PAGE) {
+        const { data, error } = await supabase
+          .from('purchases')
+          .select('created_at,total,status')
+          .eq('org_id', org!.id)
+          .eq('status', 'received')
+          .gte('created_at', range.start.toISOString())
+          .lt('created_at', range.end.toISOString())
+          .order('created_at', { ascending: true })
+          .range(offset, offset + PAGE - 1)
+        if (error) throw error
+        rows.push(...((data ?? []) as PurchasePoint[]))
+        if ((data ?? []).length < PAGE) break
+      }
+      return rows
+    },
+  })
+
+  const salesSummary = useMemo(
+    () => summarizeRange(salesRange.data ?? [], range.start, range.end),
+    [salesRange.data, range],
+  )
+  const purchaseTotal = useMemo(() => sumTotals(purchasesRange.data ?? []), [purchasesRange.data])
+  // A disabled (role-gated) metric counts as ready so it never blocks the other
+  // metric on loading. On a preset switch the new range key has no cached data,
+  // so a spinner shows instead of stale totals masquerading as the new range;
+  // a background refetch of the SAME range keeps its numbers dimmed with an
+  // "Updating" indicator.
+  const shownSales = !showSales ? salesSummary : salesRange.data !== undefined ? salesSummary : null
+  const shownPurchases = !showPurchases ? purchaseTotal : purchasesRange.data !== undefined ? purchaseTotal : null
+  const salesPending = showSales && customReady && (salesRange.isLoading || salesRange.isFetching)
+  const purchasesPending = showPurchases && customReady && (purchasesRange.isLoading || purchasesRange.isFetching)
+  const totalsPending = salesPending || purchasesPending
+
+  const buckets = useMemo(
+    () => bucketByRange(salesRange.data ?? [], range.start, range.end),
+    [salesRange.data, range],
+  )
+  const maxBucket = Math.max(0, ...buckets.map((b) => b.total))
+
   const recent = useQuery({ queryKey: ['sales', org!.id, scopeKey, 'dashboard-recent'], enabled: showSales, queryFn: async () => {
     let s = supabase.from('sales').select('id,receipt_no,created_at,status,total,balance_due,branch_id,customers(name)').eq('org_id', org!.id)
     if (branch) s = s.eq('branch_id', branch.id)
@@ -94,15 +170,6 @@ export default function Dashboard() {
     if (error) throw error
     return (data ?? []) as StockRow[]
   } })
-
-  const today = useMemo(() => summarizeSales(points.data ?? [], startOfDay()), [points.data])
-  const days = PERIODS.find((p) => p.id === period)!.days
-  const periodSummary = useMemo(
-    () => summarizeSales(points.data ?? [], days === 1 ? startOfDay() : daysAgo(days - 1)),
-    [points.data, days],
-  )
-  const buckets = useMemo(() => bucketSalesByDay(points.data ?? [], days), [points.data, days])
-  const maxBucket = Math.max(0, ...buckets.map((b) => b.total))
 
   const combined = useMemo(() => {
     const byProduct = new Map((stock.data ?? []).map((s) => [s.product_id, s]))
@@ -135,13 +202,22 @@ export default function Dashboard() {
     allowed('purchases', org?.role) && { to: '/purchases', title: 'Purchases', desc: 'Orders, receiving and history', enabled: true },
   ].filter((a): a is { to: string; title: string; desc: string; enabled: boolean } => !!a)
 
+  const setPreset = (id: RangeId) => {
+    setRangeId(id)
+    if (id === 'custom' && !custom.startDate && !custom.endDate) {
+      const t = todayStr()
+      setCustom({ startDate: t, endDate: t })
+    }
+  }
+
   return (
-    <div className="space-y-4 sm:space-y-5">
+    // Shared sea-blue canvas (pageCanvasCls); white/light cards on top. Queries/logic unchanged.
+    <div className={pageCanvasCls}>
       {/* Welcome / business context */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-xl font-bold tracking-tight text-ink-900 sm:text-2xl">Welcome back, {firstName}</h1>
-          <p className="mt-0.5 text-sm text-slate-500">
+          <h1 className="text-xl font-bold tracking-tight text-white sm:text-2xl">Welcome back, {firstName}</h1>
+          <p className="mt-0.5 text-sm text-sky-100/85">
             Here&apos;s what&apos;s happening at {org!.name}{branch ? ` · ${branch.name}` : ''} today.
           </p>
         </div>
@@ -186,18 +262,104 @@ export default function Dashboard() {
         </nav>
       )}
 
+      {/* Sales & purchases totals — organization-wide, date-filtered */}
+      {showTotals && (
+        <Card className="p-4 sm:p-5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-base font-bold tracking-tight text-ink-900">Sales &amp; Purchases</h2>
+            <div role="group" aria-label="Totals period" className="flex flex-wrap gap-1 rounded-lg bg-brand-50 p-1">
+              {RANGES.map((p) => (
+                <button
+                  key={p.id}
+                  aria-pressed={rangeId === p.id}
+                  onClick={() => setPreset(p.id)}
+                  className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors ${
+                    rangeId === p.id ? 'bg-white text-brand-800 shadow-sm' : 'text-slate-500 hover:text-brand-700'
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          {rangeId === 'custom' && (
+            <div className="mt-3 flex flex-wrap items-end gap-2">
+              <label className="text-xs font-medium text-slate-600">
+                Start date
+                <input
+                  type="date"
+                  value={custom.startDate}
+                  max={custom.endDate || todayStr()}
+                  onChange={(e) => setCustom((c) => ({ ...c, startDate: e.target.value }))}
+                  aria-label="Custom range start date"
+                  className={`${selectCls} ml-2`}
+                />
+              </label>
+              <label className="text-xs font-medium text-slate-600">
+                End date
+                <input
+                  type="date"
+                  value={custom.endDate}
+                  min={custom.startDate || undefined}
+                  max={todayStr()}
+                  onChange={(e) => setCustom((c) => ({ ...c, endDate: e.target.value }))}
+                  aria-label="Custom range end date"
+                  className={`${selectCls} ml-2`}
+                />
+              </label>
+              {rangeId === 'custom' && !customReady && (
+                <p className="text-xs text-slate-500">Pick a start and end date (start on or before end).</p>
+              )}
+            </div>
+          )}
+          <div className="mt-3" aria-live="polite">
+            {rangeId === 'custom' && !customReady ? (
+              <EmptyState title="Choose a date range." hint="Pick a start and end date to see organization-wide totals." />
+            ) : (showSales && salesRange.isError) || (showPurchases && purchasesRange.isError) ? (
+              <QueryProblem
+                error={salesRange.error ?? purchasesRange.error}
+                onRetry={() => { void salesRange.refetch(); void purchasesRange.refetch() }}
+                what="the sales and purchase totals"
+              />
+            ) : shownSales === null || shownPurchases === null ? (
+              <p className="py-4 text-center"><Spinner label="Loading totals…" /></p>
+            ) : (
+              <div className={totalsPending ? 'opacity-60 transition-opacity' : undefined}>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {showSales && shownSales && (
+                    <div className="rounded-xl border border-brand-100 bg-brand-50/50 p-4">
+                      {totalsPending && <p className="mb-1"><Spinner label="Updating totals…" /></p>}
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Total Sales · {range.label}</p>
+                      <p className="mt-1 text-2xl font-extrabold tracking-tight text-ink-900">{money(shownSales.revenue)}</p>
+                      <p className="mt-0.5 text-xs text-slate-500">
+                        {shownSales.count === 0
+                          ? 'No completed sales in this period.'
+                          : `${shownSales.count} completed sale${shownSales.count === 1 ? '' : 's'} · avg ${money(shownSales.avg)}`}
+                      </p>
+                    </div>
+                  )}
+                  {showPurchases && shownPurchases !== null && (
+                    <div className="rounded-xl border border-brand-100 bg-brand-50/50 p-4">
+                      {totalsPending && showSales && <p className="mb-1" aria-hidden="true">&nbsp;</p>}
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Total Purchases · {range.label}</p>
+                      <p className="mt-1 text-2xl font-extrabold tracking-tight text-ink-900">{money(shownPurchases)}</p>
+                      <p className="mt-0.5 text-xs text-slate-500">
+                        {(purchasesRange.data?.length ?? 0) === 0
+                          ? 'No received purchases in this period.'
+                          : `${purchasesRange.data!.length} received purchase${purchasesRange.data!.length === 1 ? '' : 's'} (organization-wide)`}
+                      </p>
+                    </div>
+                  )}
+                </div>
+                <p className="mt-2 text-xs text-slate-500">Organization-wide · all branches.</p>
+              </div>
+            )}
+          </div>
+        </Card>
+      )}
+
       {/* KPI cards — every value comes from the queries above, never hard-coded */}
       <section aria-label="Business summary" className="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3 xl:grid-cols-4">
-        {showSales && (
-          <>
-            <Kpi label="Today's Sales" hint={`${today.count} order${today.count === 1 ? '' : 's'} today`} accent="from-brand-500 to-brand-300">
-              {points.isLoading ? <Spinner label="Loading sales…" /> : points.isError ? <QueryProblem error={points.error} onRetry={() => points.refetch()} what="today's sales" /> : <KpiValue value={money(today.revenue)} />}
-            </Kpi>
-            <Kpi label="Today's Orders" hint={today.count ? `Average ticket ${money(today.avg)}` : 'No orders yet today'} accent="from-sky-500 to-brand-300">
-              {points.isLoading ? <Spinner label="Loading orders…" /> : points.isError ? <QueryProblem error={points.error} onRetry={() => points.refetch()} what="today's orders" /> : <KpiValue value={String(today.count)} />}
-            </Kpi>
-          </>
-        )}
         <Kpi label="Products" hint="Active products in the catalogue" accent="from-emerald-500 to-emerald-300">
           {products.isLoading ? <Spinner label="Loading products…" /> : products.isError ? <QueryProblem error={products.error} onRetry={() => products.refetch()} what="products" /> : <KpiValue value={String(products.data?.length ?? 0)} />}
         </Kpi>
@@ -219,38 +381,27 @@ export default function Dashboard() {
             <Card className="p-4 sm:p-5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 className="text-base font-bold tracking-tight text-ink-900">Sales overview</h2>
-                <div role="group" aria-label="Overview period" className="flex gap-1 rounded-lg bg-brand-50 p-1">
-                  {PERIODS.map((p) => (
-                    <button
-                      key={p.id}
-                      aria-pressed={period === p.id}
-                      onClick={() => setPeriod(p.id)}
-                      className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors ${
-                        period === p.id ? 'bg-white text-brand-800 shadow-sm' : 'text-slate-500 hover:text-brand-700'
-                      }`}
-                    >
-                      {p.label}
-                    </button>
-                  ))}
-                </div>
+                <p className="text-xs text-slate-500">Same {range.label.toLowerCase()} range · all branches</p>
               </div>
-              {points.isLoading ? (
+              {rangeId === 'custom' && !customReady ? (
+                <EmptyState title="Choose a date range." hint="Pick a start and end date to see the sales chart." />
+              ) : salesRange.isError ? (
+                <div className="py-4"><QueryProblem error={salesRange.error} onRetry={() => salesRange.refetch()} what="the sales overview" /></div>
+              ) : salesRange.data === undefined ? (
                 <p className="py-8 text-center"><Spinner label="Loading sales…" /></p>
-              ) : points.isError ? (
-                <div className="py-4"><QueryProblem error={points.error} onRetry={() => points.refetch()} what="the sales overview" /></div>
-              ) : periodSummary.count === 0 ? (
-                <EmptyState title="No sales in this period." hint="Completed sales at this branch will appear here." />
+              ) : salesSummary.count === 0 ? (
+                <EmptyState title="No sales in this period." hint="Completed sales at any branch will appear here." />
               ) : (
                 <>
                   <p className="mt-2 text-sm text-slate-600" aria-live="polite">
-                    <strong className="text-lg font-extrabold tracking-tight text-ink-900">{money(periodSummary.revenue)}</strong>{' '}
-                    · {periodSummary.count} order{periodSummary.count === 1 ? '' : 's'} · avg {money(periodSummary.avg)}
+                    <strong className="text-lg font-extrabold tracking-tight text-ink-900">{money(salesSummary.revenue)}</strong>{' '}
+                    · {salesSummary.count} order{salesSummary.count === 1 ? '' : 's'} · avg {money(salesSummary.avg)}
                   </p>
                   {/* Pure CSS bars from real daily totals — no chart dependency. */}
                   <div
                     className="mt-3 flex h-28 items-end gap-1"
                     role="img"
-                    aria-label={`Daily sales for ${PERIODS.find((p) => p.id === period)!.label}: ${money(periodSummary.revenue)} across ${periodSummary.count} orders`}
+                    aria-label={`Daily sales for ${range.label}: ${money(salesSummary.revenue)} across ${salesSummary.count} orders`}
                   >
                     {buckets.map((b, i) => (
                       <div key={b.key} className="flex min-w-0 flex-1 flex-col items-center justify-end gap-1 self-stretch" title={`${b.label}: ${money(b.total)} (${b.total_count} orders)`}>
@@ -259,7 +410,7 @@ export default function Dashboard() {
                           style={{ height: `${maxBucket > 0 ? Math.max(b.total > 0 ? 6 : 1, (b.total / maxBucket) * 100) : 1}%` }}
                         />
                         <span className="min-h-[14px] text-[10px] leading-[14px] text-slate-500">
-                          {days > 7 ? (i % 5 === 0 ? b.label : '') : b.label}
+                          {buckets.length > 7 ? (i % Math.ceil(buckets.length / 7) === 0 ? b.label : '') : b.label}
                         </span>
                       </div>
                     ))}

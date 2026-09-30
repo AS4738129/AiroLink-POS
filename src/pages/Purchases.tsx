@@ -5,8 +5,8 @@ import { useAuth } from '../features/auth/AuthProvider'
 import { allowed } from '../lib/permissions'
 import { r2 } from '../lib/calc'
 import {
-  Btn, Card, EmptyState, Field, Notice, PageHeader, Spinner, StatusBadge,
-  TableShell, inputCls, rowCls, selectCls, tdCls, thCls, filterBarCls,
+  Btn, Card, EmptyState, Field, Notice, PageHeaderOnDark, Spinner, StatusBadge,
+  TableShell, inputCls, rowCls, selectCls, tdCls, thCls, filterBarCls, pageCanvasCls,
 } from '../components/ui'
 
 const PAGE = 20
@@ -134,8 +134,8 @@ export default function Purchases() {
   const pages = Math.max(1, Math.ceil((list.data?.count ?? 0) / PAGE))
 
   return (
-    <div className="space-y-4">
-      <PageHeader
+    <div className={pageCanvasCls}>
+      <PageHeaderOnDark
         title="Purchases"
         description="Purchase orders, goods receiving and purchase history."
         actions={canEdit ? (
