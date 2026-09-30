@@ -11,7 +11,7 @@ import { METHODS, paymentSummary, paymentsPayload, type Method, type PayLine } f
 import { addToCart, setQuantity, removeLine, type CartLine } from '../lib/cart'
 import { ReceiptDialog } from '../components/ReceiptDialog'
 import {
-  Btn, Card, EmptyState, Field, Notice, PageHeaderOnDark, Spinner, StatusBadge,
+  Btn, Card, CrudIcon, EmptyState, Field, Notice, PageHeaderOnDark, Spinner, StatusBadge,
   TableShell, inputCls, rowCls, selectCls, tdCls, thCls, pageCanvasCls,
 } from '../components/ui'
 
@@ -109,15 +109,20 @@ export default function Pos() {
       )}
       <div className="grid items-start gap-4 xl:grid-cols-5">
         <section className="space-y-3 xl:col-span-3">
-          <input
-            autoFocus
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter' && q.trim()) void scan(q.trim()) }}
-            placeholder="Search name or SKU, or scan a barcode and press Enter"
-            aria-label="Search products"
-            className={`${inputCls} py-3`}
-          />
+          <div className="relative">
+            <span aria-hidden className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+              <CrudIcon name="search" />
+            </span>
+            <input
+              autoFocus
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && q.trim()) void scan(q.trim()) }}
+              placeholder="Search name or SKU, or scan a barcode and press Enter"
+              aria-label="Search products"
+              className={`${inputCls} py-3 pl-9`}
+            />
+          </div>
           {found.isError && (
             <Notice tone="err">
               Could not load products.<br />
@@ -253,11 +258,15 @@ export default function Pos() {
             )}
             {msg && <Notice tone={msg.ok ? 'ok' : 'err'}>{msg.t}</Notice>}
             <div className="flex gap-2">
-              <Btn onClick={() => { setCart([]); setDiscount(0); setLines([{ method: 'cash', amount: '' }]); setCashReceived(''); setMsg(null) }}>
-                Clear
+              <Btn
+                onClick={() => { setCart([]); setDiscount(0); setLines([{ method: 'cash', amount: '' }]); setCashReceived(''); setMsg(null) }}
+                disabled={cart.length === 0 && !discount && !cashReceived && !msg}
+                title="Empties the cart (nothing is recorded)"
+              >
+                <CrudIcon name="close" /> Clear
               </Btn>
-              <Btn variant="primary" disabled={!canPay} onClick={() => void pay()} className="flex-1 py-2.5 text-base">
-                {busy ? 'Recording sale…' : `Complete sale · ${money(t.total)}`}
+              <Btn variant="primary" disabled={!canPay} title={!branch ? 'Select a branch to check out' : needsCustomer && !customer ? 'Select a customer to sell the unpaid remainder on credit' : 'Record this sale'} onClick={() => void pay()} className="flex-1 py-2.5 text-base">
+                {busy ? (<Spinner label="Recording sale…" />) : `Complete sale · ${money(t.total)}`}
               </Btn>
             </div>
           </Card>

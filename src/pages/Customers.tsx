@@ -5,8 +5,8 @@ import { supabase, friendly } from '../lib/supabase'
 import { useAuth } from '../features/auth/AuthProvider'
 import { allowed } from '../lib/permissions'
 import {
-  Btn, Card, EmptyState, Field, Notice, PageHeaderOnDark, Spinner, StatusBadge,
-  TableShell, inputCls, rowCls, tdCls, thCls, filterBarCls, pageCanvasCls,
+  Btn, Card, CrudIcon, Dialog, EmptyState, Field, Notice, PageHeaderOnDark, Pager, RowAction, Spinner, StatusBadge,
+  TableShell, inputCls, rowCls, selectCls, tdCls, thCls, filterBarCls, pageCanvasCls,
 } from '../components/ui'
 
 const PAGE = 20
@@ -80,7 +80,6 @@ export default function Customers() {
       />
     </Field>
   )
-  const pages = Math.max(1, Math.ceil((list.data?.count ?? 0) / PAGE))
 
   return (
     <div className={pageCanvasCls}>
@@ -89,7 +88,7 @@ export default function Customers() {
         description="Customer directory, contact details and credit balances."
         actions={canEdit ? (
           <Btn variant="primary" onClick={() => { setEditing(null); setErrs({}); setFormOpen((v) => !v) }} aria-expanded={formOpen}>
-            {formOpen ? 'Close form' : '+ Add customer'}
+            {formOpen ? (<><CrudIcon name="close" /> Close form</>) : (<><CrudIcon name="add" /> Add customer</>)}
           </Btn>
         ) : undefined}
       />
@@ -97,8 +96,13 @@ export default function Customers() {
 
       {canEdit && formOpen && (
         <Card className="p-4 sm:p-5">
-          <form key={editing?.id ?? 'new'} onSubmit={submit} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <p className="col-span-full text-sm font-semibold text-slate-900">{editing ? `Editing ${editing.name}` : 'Add a customer'}</p>
+          <form key={editing?.id ?? 'new'} onSubmit={submit} className="grid items-start gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <p className="col-span-full border-b border-brand-100/70 pb-2 text-sm font-semibold text-slate-900">
+              {editing ? `Editing ${editing.name}` : 'Add a customer'}
+              <span className="mt-0.5 block text-xs font-normal text-slate-500">
+                {editing ? 'Update the contact details, then save.' : 'Credit balance starts at zero and only moves through sales and voids.'}
+              </span>
+            </p>
             {field('name', 'Name', 'text', { required: true })}
             {field('phone', 'Phone')}
             {field('email', 'Email', 'email')}
@@ -113,10 +117,10 @@ export default function Customers() {
             )}
             <div className="flex items-end gap-2 sm:col-span-2 lg:col-span-3">
               <Btn variant="primary" disabled={save.isPending}>
-                {save.isPending ? 'Saving…' : editing ? 'Save changes' : 'Add customer'}
+                {save.isPending ? (<Spinner label="Saving…" />) : editing ? (<><CrudIcon name="save" /> Save changes</>) : (<><CrudIcon name="add" /> Add customer</>)}
               </Btn>
               <Btn type="button" onClick={() => { setEditing(null); setFormOpen(false) }}>
-                {editing ? 'Cancel' : 'Close'}
+                <CrudIcon name="close" /> {editing ? 'Cancel' : 'Close'}
               </Btn>
             </div>
           </form>
@@ -125,7 +129,7 @@ export default function Customers() {
 
       <div className={filterBarCls}>
         <input value={q} onChange={(e) => { setQ(e.target.value); setPage(0) }} placeholder="Search name, phone or email" aria-label="Search customers" className={`${inputCls} sm:max-w-xs`} />
-        <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value as typeof statusFilter); setPage(0) }} aria-label="Status filter" className="rounded-lg border border-brand-100 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm">
+        <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value as typeof statusFilter); setPage(0) }} aria-label="Status filter" className={selectCls}>
           <option value="active">Active</option>
           <option value="inactive">Inactive</option>
           <option value="all">All</option>
@@ -144,11 +148,12 @@ export default function Customers() {
           {list.isLoading && <tr><td className="p-4" colSpan={6}><Spinner label="Loading customers…" /></td></tr>}
           {list.isError && (
             <tr><td className="p-4 text-red-700" colSpan={6}>
-              Could not load customers. <button className="font-medium underline" onClick={() => list.refetch()}>Retry</button>
+              Could not load customers.{' '}
+              <RowAction icon="refresh" onClick={() => list.refetch()}>Retry</RowAction>
             </td></tr>
           )}
           {list.data && list.data.rows.length === 0 && (
-            <tr><td colSpan={6}><EmptyState title="No customers match." hint="Try a different search — or add a customer above." /></td></tr>
+            <tr><td colSpan={6}><EmptyState title={q.trim() || statusFilter !== 'all' ? 'No customers match these filters.' : 'No customers yet.'} hint={q.trim() || statusFilter !== 'all' ? 'Try a different search — or clear the filters to see everyone.' : 'Add your first customer above; they can then buy on credit.'} /></td></tr>
           )}
           {list.data?.rows.map((c) => (
             <tr key={c.id} className={rowCls}>
@@ -162,46 +167,44 @@ export default function Customers() {
                 <StatusBadge tone={c.is_active ? 'green' : 'slate'}>{c.is_active ? 'Active' : 'Inactive'}</StatusBadge>
               </td>
               <td className={`${tdCls} whitespace-nowrap`}>
-                <button className="font-medium text-brand-700 hover:underline" onClick={() => setDetail(c)}>View</button>
-                {canEdit && (
-                  <>
-                    <button className="ml-3 font-medium text-brand-700 hover:underline" onClick={() => { setEditing(c); setErrs({}); setFormOpen(true) }}>Edit</button>
-                    <button className="ml-3 font-medium text-brand-700 hover:underline" onClick={() => toggle.mutate(c)}>
-                      {c.is_active ? 'Deactivate' : 'Activate'}
-                    </button>
-                  </>
-                )}
+                <span className="inline-flex items-center gap-1">
+                  <RowAction icon="view" onClick={() => setDetail(c)}>View</RowAction>
+                  {canEdit && (
+                    <>
+                      <RowAction icon="edit" onClick={() => { setEditing(c); setErrs({}); setFormOpen(true) }}>Edit</RowAction>
+                      <RowAction
+                        icon={c.is_active ? 'deactivate' : 'activate'}
+                        danger={c.is_active}
+                        disabled={toggle.isPending}
+                        title={c.is_active ? 'Deactivates the customer (keeps their history)' : 'Reactivates the customer'}
+                        onClick={() => toggle.mutate(c)}
+                      >
+                        {c.is_active ? 'Deactivate' : 'Activate'}
+                      </RowAction>
+                    </>
+                  )}
+                </span>
               </td>
             </tr>
           ))}
         </tbody>
       </TableShell>
-      <div className="flex items-center gap-3 text-sm text-slate-600">
-        <Btn disabled={page === 0} onClick={() => setPage(page - 1)}>Previous</Btn>
-        <span>Page {page + 1} of {pages}</span>
-        <Btn disabled={(page + 1) * PAGE >= (list.data?.count ?? 0)} onClick={() => setPage(page + 1)}>Next</Btn>
-      </div>
+      <Pager page={page} total={list.data?.count ?? 0} pageSize={PAGE} onPrev={() => setPage(page - 1)} onNext={() => setPage(page + 1)} />
 
       {detail && (
-        <div className="fixed inset-0 z-20 flex items-center justify-center bg-slate-900/50 p-4" onClick={() => setDetail(null)}>
-          <div role="dialog" aria-label={`Customer ${detail.name}`} className="w-full max-w-sm space-y-2 rounded-2xl border border-brand-100 bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-start justify-between gap-2">
-              <h2 className="text-base font-semibold text-slate-900">{detail.name}</h2>
-              <button type="button" onClick={() => setDetail(null)} aria-label="Close dialog" className="rounded-lg px-2 py-1 text-lg leading-none text-slate-500 hover:bg-slate-100">✕</button>
-            </div>
-            <dl className="space-y-1 text-sm">
-              {[['Phone', detail.phone], ['Email', detail.email], ['Address', detail.address]].map(([k, v]) => (
-                <div key={k} className="flex justify-between gap-3"><dt className="text-slate-500">{k}</dt><dd className="font-medium text-slate-900">{v || '—'}</dd></div>
-              ))}
-              <div className="flex justify-between gap-3"><dt className="text-slate-500">Balance</dt><dd className="font-mono font-semibold text-slate-900">{org!.currency} {Number(detail.balance).toFixed(2)}</dd></div>
-              <div className="flex justify-between gap-3"><dt className="text-slate-500">Credit limit</dt><dd className="font-mono font-medium text-slate-900">{org!.currency} {Number(detail.credit_limit).toFixed(2)}</dd></div>
-            </dl>
-            <div className="flex justify-end gap-2">
-              <Btn type="button" onClick={() => setDetail(null)}>Close</Btn>
-              {canEdit && <Btn variant="primary" onClick={() => { setEditing(detail); setErrs({}); setFormOpen(true); setDetail(null) }}>Edit</Btn>}
-            </div>
+        <Dialog label={detail.name} onClose={() => setDetail(null)}>
+          <dl className="space-y-1 text-sm">
+            {[['Phone', detail.phone], ['Email', detail.email], ['Address', detail.address]].map(([k, v]) => (
+              <div key={k} className="flex justify-between gap-3"><dt className="text-slate-500">{k}</dt><dd className="font-medium text-slate-900">{v || '—'}</dd></div>
+            ))}
+            <div className="flex justify-between gap-3"><dt className="text-slate-500">Balance</dt><dd className="font-mono font-semibold text-slate-900">{org!.currency} {Number(detail.balance).toFixed(2)}</dd></div>
+            <div className="flex justify-between gap-3"><dt className="text-slate-500">Credit limit</dt><dd className="font-mono font-medium text-slate-900">{org!.currency} {Number(detail.credit_limit).toFixed(2)}</dd></div>
+          </dl>
+          <div className="flex justify-end gap-2">
+            <Btn type="button" onClick={() => setDetail(null)}><CrudIcon name="close" /> Close</Btn>
+            {canEdit && <Btn variant="primary" onClick={() => { setEditing(detail); setErrs({}); setFormOpen(true); setDetail(null) }}><CrudIcon name="edit" /> Edit</Btn>}
           </div>
-        </div>
+        </Dialog>
       )}
     </div>
   )

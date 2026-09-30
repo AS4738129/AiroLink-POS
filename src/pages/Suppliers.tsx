@@ -5,8 +5,8 @@ import { supabase, friendly } from '../lib/supabase'
 import { useAuth } from '../features/auth/AuthProvider'
 import { allowed } from '../lib/permissions'
 import {
-  Btn, Card, EmptyState, Field, Notice, PageHeaderOnDark, Spinner, StatusBadge,
-  TableShell, inputCls, rowCls, tdCls, thCls, filterBarCls, pageCanvasCls,
+  Btn, Card, CrudIcon, Dialog, EmptyState, Field, Notice, PageHeaderOnDark, Pager, RowAction, Spinner, StatusBadge,
+  TableShell, inputCls, rowCls, selectCls, tdCls, thCls, filterBarCls, pageCanvasCls,
 } from '../components/ui'
 
 const PAGE = 20
@@ -78,7 +78,6 @@ export default function Suppliers() {
       />
     </Field>
   )
-  const pages = Math.max(1, Math.ceil((list.data?.count ?? 0) / PAGE))
 
   return (
     <div className={pageCanvasCls}>
@@ -87,7 +86,7 @@ export default function Suppliers() {
         description="Supplier directory and contact information."
         actions={canEdit ? (
           <Btn variant="primary" onClick={() => { setEditing(null); setErrs({}); setFormOpen((v) => !v) }} aria-expanded={formOpen}>
-            {formOpen ? 'Close form' : '+ Add supplier'}
+            {formOpen ? (<><CrudIcon name="close" /> Close form</>) : (<><CrudIcon name="add" /> Add supplier</>)}
           </Btn>
         ) : undefined}
       />
@@ -95,8 +94,13 @@ export default function Suppliers() {
 
       {canEdit && formOpen && (
         <Card className="p-4 sm:p-5">
-          <form key={editing?.id ?? 'new'} onSubmit={submit} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <p className="col-span-full text-sm font-semibold text-slate-900">{editing ? `Editing ${editing.name}` : 'Add a supplier'}</p>
+          <form key={editing?.id ?? 'new'} onSubmit={submit} className="grid items-start gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <p className="col-span-full border-b border-brand-100/70 pb-2 text-sm font-semibold text-slate-900">
+              {editing ? `Editing ${editing.name}` : 'Add a supplier'}
+              <span className="mt-0.5 block text-xs font-normal text-slate-500">
+                {editing ? 'Update the contact details, then save.' : 'Deactivation (not deletion) removes a supplier from day-to-day use.'}
+              </span>
+            </p>
             {field('name', 'Name', 'text', true)}
             {field('contact_person', 'Contact person')}
             {field('phone', 'Phone')}
@@ -104,10 +108,10 @@ export default function Suppliers() {
             {field('address', 'Address')}
             <div className="flex items-end gap-2 sm:col-span-2 lg:col-span-3">
               <Btn variant="primary" disabled={save.isPending}>
-                {save.isPending ? 'Saving…' : editing ? 'Save changes' : 'Add supplier'}
+                {save.isPending ? (<Spinner label="Saving…" />) : editing ? (<><CrudIcon name="save" /> Save changes</>) : (<><CrudIcon name="add" /> Add supplier</>)}
               </Btn>
               <Btn type="button" onClick={() => { setEditing(null); setFormOpen(false) }}>
-                {editing ? 'Cancel' : 'Close'}
+                <CrudIcon name="close" /> {editing ? 'Cancel' : 'Close'}
               </Btn>
             </div>
           </form>
@@ -116,7 +120,7 @@ export default function Suppliers() {
 
       <div className={filterBarCls}>
         <input value={q} onChange={(e) => { setQ(e.target.value); setPage(0) }} placeholder="Search name, phone or email" aria-label="Search suppliers" className={`${inputCls} sm:max-w-xs`} />
-        <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value as typeof statusFilter); setPage(0) }} aria-label="Status filter" className="rounded-lg border border-brand-100 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm">
+        <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value as typeof statusFilter); setPage(0) }} aria-label="Status filter" className={selectCls}>
           <option value="active">Active</option>
           <option value="inactive">Inactive</option>
           <option value="all">All</option>
@@ -134,11 +138,12 @@ export default function Suppliers() {
           {list.isLoading && <tr><td className="p-4" colSpan={5}><Spinner label="Loading suppliers…" /></td></tr>}
           {list.isError && (
             <tr><td className="p-4 text-red-700" colSpan={5}>
-              Could not load suppliers. <button className="font-medium underline" onClick={() => list.refetch()}>Retry</button>
+              Could not load suppliers.{' '}
+              <RowAction icon="refresh" onClick={() => list.refetch()}>Retry</RowAction>
             </td></tr>
           )}
           {list.data && list.data.rows.length === 0 && (
-            <tr><td colSpan={5}><EmptyState title="No suppliers match." hint="Try a different search — or add a supplier above." /></td></tr>
+            <tr><td colSpan={5}><EmptyState title={q.trim() || statusFilter !== 'all' ? 'No suppliers match these filters.' : 'No suppliers yet.'} hint={q.trim() || statusFilter !== 'all' ? 'Try a different search — or clear the filters to see everyone.' : 'Add your first supplier above to start creating purchases.'} /></td></tr>
           )}
           {list.data?.rows.map((s) => (
             <tr key={s.id} className={rowCls}>
@@ -149,44 +154,42 @@ export default function Suppliers() {
                 <StatusBadge tone={s.is_active ? 'green' : 'slate'}>{s.is_active ? 'Active' : 'Inactive'}</StatusBadge>
               </td>
               <td className={`${tdCls} whitespace-nowrap`}>
-                <button className="font-medium text-brand-700 hover:underline" onClick={() => setDetail(s)}>View</button>
-                {canEdit && (
-                  <>
-                    <button className="ml-3 font-medium text-brand-700 hover:underline" onClick={() => { setEditing(s); setErrs({}); setFormOpen(true) }}>Edit</button>
-                    <button className="ml-3 font-medium text-brand-700 hover:underline" onClick={() => toggle.mutate(s)}>
-                      {s.is_active ? 'Deactivate' : 'Activate'}
-                    </button>
-                  </>
-                )}
+                <span className="inline-flex items-center gap-1">
+                  <RowAction icon="view" onClick={() => setDetail(s)}>View</RowAction>
+                  {canEdit && (
+                    <>
+                      <RowAction icon="edit" onClick={() => { setEditing(s); setErrs({}); setFormOpen(true) }}>Edit</RowAction>
+                      <RowAction
+                        icon={s.is_active ? 'deactivate' : 'activate'}
+                        danger={s.is_active}
+                        disabled={toggle.isPending}
+                        title={s.is_active ? 'Deactivates the supplier (keeps their history)' : 'Reactivates the supplier'}
+                        onClick={() => toggle.mutate(s)}
+                      >
+                        {s.is_active ? 'Deactivate' : 'Activate'}
+                      </RowAction>
+                    </>
+                  )}
+                </span>
               </td>
             </tr>
           ))}
         </tbody>
       </TableShell>
-      <div className="flex items-center gap-3 text-sm text-slate-600">
-        <Btn disabled={page === 0} onClick={() => setPage(page - 1)}>Previous</Btn>
-        <span>Page {page + 1} of {pages}</span>
-        <Btn disabled={(page + 1) * PAGE >= (list.data?.count ?? 0)} onClick={() => setPage(page + 1)}>Next</Btn>
-      </div>
+      <Pager page={page} total={list.data?.count ?? 0} pageSize={PAGE} onPrev={() => setPage(page - 1)} onNext={() => setPage(page + 1)} />
 
       {detail && (
-        <div className="fixed inset-0 z-20 flex items-center justify-center bg-slate-900/50 p-4" onClick={() => setDetail(null)}>
-          <div role="dialog" aria-label={`Supplier ${detail.name}`} className="w-full max-w-sm space-y-2 rounded-2xl border border-brand-100 bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-start justify-between gap-2">
-              <h2 className="text-base font-semibold text-slate-900">{detail.name}</h2>
-              <button type="button" onClick={() => setDetail(null)} aria-label="Close dialog" className="rounded-lg px-2 py-1 text-lg leading-none text-slate-500 hover:bg-slate-100">✕</button>
-            </div>
-            <dl className="space-y-1 text-sm">
-              {[['Contact person', detail.contact_person], ['Phone', detail.phone], ['Email', detail.email], ['Address', detail.address]].map(([k, v]) => (
-                <div key={k} className="flex justify-between gap-3"><dt className="text-slate-500">{k}</dt><dd className="font-medium text-slate-900">{v || '—'}</dd></div>
-              ))}
-            </dl>
-            <div className="flex justify-end gap-2">
-              <Btn type="button" onClick={() => setDetail(null)}>Close</Btn>
-              {canEdit && <Btn variant="primary" onClick={() => { setEditing(detail); setErrs({}); setFormOpen(true); setDetail(null) }}>Edit</Btn>}
-            </div>
+        <Dialog label={detail.name} onClose={() => setDetail(null)}>
+          <dl className="space-y-1 text-sm">
+            {[['Contact person', detail.contact_person], ['Phone', detail.phone], ['Email', detail.email], ['Address', detail.address]].map(([k, v]) => (
+              <div key={k} className="flex justify-between gap-3"><dt className="text-slate-500">{k}</dt><dd className="font-medium text-slate-900">{v || '—'}</dd></div>
+            ))}
+          </dl>
+          <div className="flex justify-end gap-2">
+            <Btn type="button" onClick={() => setDetail(null)}><CrudIcon name="close" /> Close</Btn>
+            {canEdit && <Btn variant="primary" onClick={() => { setEditing(detail); setErrs({}); setFormOpen(true); setDetail(null) }}><CrudIcon name="edit" /> Edit</Btn>}
           </div>
-        </div>
+        </Dialog>
       )}
     </div>
   )

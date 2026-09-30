@@ -5,7 +5,7 @@ import { useAuth } from '../features/auth/AuthProvider'
 import { allowed } from '../lib/permissions'
 import { r2 } from '../lib/calc'
 import {
-  Btn, Card, EmptyState, Field, Notice, PageHeaderOnDark, Spinner, StatusBadge,
+  Btn, Card, CrudIcon, Dialog, EmptyState, Field, Notice, PageHeaderOnDark, Pager, RowAction, Spinner, StatusBadge,
   TableShell, inputCls, rowCls, selectCls, tdCls, thCls, filterBarCls, pageCanvasCls,
 } from '../components/ui'
 
@@ -140,7 +140,7 @@ export default function Purchases() {
         description="Purchase orders, goods receiving and purchase history."
         actions={canEdit ? (
           <Btn variant="primary" onClick={() => setFormOpen((v) => !v)} aria-expanded={formOpen}>
-            {formOpen ? 'Close form' : '+ New purchase'}
+            {formOpen ? (<><CrudIcon name="close" /> Close form</>) : (<><CrudIcon name="add" /> New purchase</>)}
           </Btn>
         ) : undefined}
       />
@@ -198,9 +198,9 @@ export default function Purchases() {
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-brand-100 pt-3">
             <p className="text-sm text-slate-600">Total <strong className="font-mono text-base text-ink-900">{org!.currency} {preview.total.toFixed(2)}</strong></p>
             <div className="flex gap-2">
-              <Btn type="button" onClick={() => setFormOpen(false)}>Cancel</Btn>
+              <Btn type="button" onClick={() => setFormOpen(false)}><CrudIcon name="close" /> Cancel</Btn>
               <Btn variant="primary" disabled={!draftValid || createDraft.isPending} onClick={() => createDraft.mutate()}>
-                {createDraft.isPending ? 'Saving…' : 'Save draft'}
+                {createDraft.isPending ? (<Spinner label="Saving…" />) : (<><CrudIcon name="save" /> Save draft</>)}
               </Btn>
             </div>
           </div>
@@ -229,11 +229,12 @@ export default function Purchases() {
           {list.isLoading && <tr><td className="p-4" colSpan={7}><Spinner label="Loading purchases…" /></td></tr>}
           {list.isError && (
             <tr><td className="p-4 text-red-700" colSpan={7}>
-              Could not load purchases. <button className="font-medium underline" onClick={() => list.refetch()}>Retry</button>
+              Could not load purchases.{' '}
+              <RowAction icon="refresh" onClick={() => list.refetch()}>Retry</RowAction>
             </td></tr>
           )}
           {list.data && list.data.rows.length === 0 && (
-            <tr><td colSpan={7}><EmptyState title="No purchases match." hint="Try widening the filters — or create a purchase above." /></td></tr>
+            <tr><td colSpan={7}><EmptyState title={refQ.trim() || branchId || supplierId || status ? 'No purchases match these filters.' : 'No purchases yet.'} hint={refQ.trim() || branchId || supplierId || status ? 'Try widening the filters — or clear them to see everything.' : 'Create your first purchase above; it is saved as a draft until received.'} /></td></tr>
           )}
           {list.data?.rows.map((r) => (
             <tr key={r.id} className={rowCls}>
@@ -243,26 +244,17 @@ export default function Purchases() {
               <td className={tdCls}>{r.suppliers?.name ?? '—'}</td>
               <td className={`${tdCls} whitespace-nowrap font-medium`}>{org!.currency} {Number(r.total).toFixed(2)}</td>
               <td className={tdCls}><StatusBadge tone={statusTone(r.status)}><span className="capitalize">{r.status}</span></StatusBadge></td>
-              <td className={tdCls}><button className="font-medium text-brand-700 hover:underline" onClick={() => setDetailId(r.id)}>View</button></td>
+              <td className={`${tdCls} whitespace-nowrap`}><RowAction icon="view" onClick={() => setDetailId(r.id)}>View</RowAction></td>
             </tr>
           ))}
         </tbody>
       </TableShell>
-      <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
-        <Btn disabled={page === 0} onClick={() => setPage(page - 1)}>Previous</Btn>
-        <span>Page {page + 1} of {pages}</span>
-        <Btn disabled={(page + 1) * PAGE >= (list.data?.count ?? 0)} onClick={() => setPage(page + 1)}>Next</Btn>
-      </div>
+      <Pager page={page} total={list.data?.count ?? 0} pageSize={PAGE} onPrev={() => setPage(page - 1)} onNext={() => setPage(page + 1)} />
 
       {detailId && (
-        <div className="fixed inset-0 z-20 flex items-center justify-center bg-slate-900/50 p-4" onClick={() => setDetailId(null)}>
-          <div role="dialog" aria-label="Purchase details" className="max-h-[90vh] w-full max-w-lg space-y-3 overflow-y-auto rounded-2xl border border-brand-100 bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-start justify-between gap-2">
-              <h2 className="text-base font-semibold text-slate-900">Purchase {detail.data?.purchase.ref_no ?? '…'}</h2>
-              <button type="button" onClick={() => setDetailId(null)} aria-label="Close dialog" className="rounded-lg px-2 py-1 text-lg leading-none text-slate-500 hover:bg-slate-100">✕</button>
-            </div>
+        <Dialog label={`Purchase ${detail.data?.purchase.ref_no ?? '…'}`} wide onClose={() => setDetailId(null)}>
             {detail.isLoading && <p className="py-4 text-center"><Spinner label="Loading purchase…" /></p>}
-            {detail.isError && <Notice tone="err">Could not load this purchase. <button className="font-medium underline" onClick={() => detail.refetch()}>Retry</button></Notice>}
+            {detail.isError && <Notice tone="err">Could not load this purchase.{' '}<RowAction icon="refresh" onClick={() => detail.refetch()}>Retry</RowAction></Notice>}
             {detail.data && (
               <>
                 <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
@@ -286,30 +278,31 @@ export default function Purchases() {
                     ))}
                   </tbody>
                 </TableShell>
-                <div className="flex justify-end gap-2">
-                  <Btn type="button" onClick={() => setDetailId(null)}>Close</Btn>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Btn type="button" onClick={() => setDetailId(null)}><CrudIcon name="close" /> Close</Btn>
                   {canEdit && detail.data.purchase.status === 'draft' && (
                     <>
                       <Btn
                         disabled={cancel.isPending}
+                        title="Cancels this draft (cannot be undone)"
                         onClick={() => { const p = detail.data!.purchase; if (confirm(`Cancel purchase ${p.ref_no}? This cannot be undone.`)) cancel.mutate(p.id) }}
                       >
-                        {cancel.isPending ? 'Cancelling…' : 'Cancel purchase'}
+                        {cancel.isPending ? (<Spinner label="Cancelling…" />) : 'Cancel purchase'}
                       </Btn>
                       <Btn
                         variant="primary"
                         disabled={receive.isPending}
+                        title="Receives this purchase: stock increases and product costs update"
                         onClick={() => { const p = detail.data!.purchase; if (confirm(`Receive ${p.ref_no} at ${branchName(p.branch_id)}? Stock will increase and product costs will be updated.`)) receive.mutate(p.id) }}
                       >
-                        {receive.isPending ? 'Receiving…' : 'Receive'}
+                        {receive.isPending ? (<Spinner label="Receiving…" />) : (<><CrudIcon name="receive" /> Receive</>)}
                       </Btn>
                     </>
                   )}
                 </div>
               </>
             )}
-          </div>
-        </div>
+        </Dialog>
       )}
     </div>
   )

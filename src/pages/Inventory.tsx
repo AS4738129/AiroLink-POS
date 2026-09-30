@@ -4,7 +4,7 @@ import { supabase, friendly } from '../lib/supabase'
 import { useAuth } from '../features/auth/AuthProvider'
 import { allowed } from '../lib/permissions'
 import {
-  Btn, Card, EmptyState, Field, Notice, PageHeaderOnDark, Spinner, StatusBadge,
+  Btn, Card, CrudIcon, Dialog, EmptyState, Field, Notice, PageHeaderOnDark, RowAction, Spinner, StatusBadge,
   TableShell, inputCls, rowCls, selectCls, tdCls, thCls, filterBarCls, pageCanvasCls,
 } from '../components/ui'
 
@@ -144,9 +144,9 @@ export default function Inventory() {
         </thead>
         <tbody>
           {(products.isLoading || stock.isLoading) && <tr><td className="p-4" colSpan={6}><Spinner label="Loading inventory…" /></td></tr>}
-          {(products.isError || stock.isError) && <tr><td className="p-4 text-red-700" colSpan={6}>Could not load inventory. <button className="font-medium underline" onClick={() => { void products.refetch(); void stock.refetch() }}>Retry</button></td></tr>}
+          {(products.isError || stock.isError) && <tr><td className="p-4 text-red-700" colSpan={6}>Could not load inventory.{' '}<RowAction icon="refresh" onClick={() => { void products.refetch(); void stock.refetch() }}>Retry</RowAction></td></tr>}
           {rows.length === 0 && !products.isLoading && !stock.isLoading && !(products.isError || stock.isError) && (
-            <tr><td colSpan={6}><EmptyState title="No products match." hint="Try a different search or stock filter." /></td></tr>
+            <tr><td colSpan={6}><EmptyState title={q.trim() || statusFilter !== 'all' ? 'No products match these filters.' : 'No products to track yet.'} hint={q.trim() || statusFilter !== 'all' ? 'Try a different search or stock filter.' : 'Add products on the Products page, then set their opening stock here.'} /></td></tr>
           )}
           {rows.map((p) => (
             <tr key={p.id} className={rowCls}>
@@ -166,27 +166,23 @@ export default function Inventory() {
                 ) : p.min_stock}
               </td>
               <td className={tdCls}><StatusBadge tone={toneOf(statusOf(p))}>{statusOf(p)}</StatusBadge></td>
-              <td className={tdCls}>{canAdjust && <button className="font-medium text-brand-700 hover:underline" onClick={() => setAdjusting(p)}>Adjust</button>}</td>
+              <td className={`${tdCls} whitespace-nowrap`}>{canAdjust && <RowAction icon="adjust" title="Record opening, adjustment, damaged, expired or count for this product" onClick={() => setAdjusting(p)}>Adjust</RowAction>}</td>
             </tr>
           ))}
         </tbody>
       </TableShell>
 
       {adjusting && (
-        <div className="fixed inset-0 z-20 flex items-center justify-center bg-slate-900/50 p-4" onClick={() => setAdjusting(null)}>
+        <Dialog label={`Adjust stock — ${adjusting.name}`} onClose={() => setAdjusting(null)}>
           <form
-            role="dialog"
-            aria-label={`Adjust stock for ${adjusting.name}`}
-            className="w-full max-w-sm space-y-3 rounded-2xl border border-brand-100 bg-white p-5 shadow-xl"
-            onClick={(e) => e.stopPropagation()}
+            className="space-y-3"
             onSubmit={(e) => { e.preventDefault(); const f = new FormData(e.currentTarget)
               adjust.mutate({ reason: f.get('reason') as Reason, qty: Number(f.get('qty')), note: String(f.get('note') || '') }) }}
           >
-            <div className="flex items-start justify-between gap-2">
-              <h2 className="text-base font-semibold text-slate-900">Adjust stock — {adjusting.name}</h2>
-              <button type="button" onClick={() => setAdjusting(null)} aria-label="Close dialog" className="rounded-lg px-2 py-1 text-lg leading-none text-slate-500 hover:bg-slate-100">✕</button>
-            </div>
-            <p className="text-sm text-slate-600">Current stock at {branch.name}: <strong>{adjusting.stock_qty}</strong></p>
+            <p className="text-sm text-slate-600">
+              Current stock at {branch.name}: <strong>{adjusting.stock_qty}</strong>
+              <span className="mt-0.5 block text-xs text-slate-500">Every adjustment is written to the inventory ledger with its reason.</span>
+            </p>
             <Field label="Reason">
               <select name="reason" defaultValue="adjustment" className={selectCls + ' w-full'}>
                 {REASONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
@@ -199,11 +195,13 @@ export default function Inventory() {
               <input name="note" className={inputCls} />
             </Field>
             <div className="flex justify-end gap-2">
-              <Btn type="button" onClick={() => setAdjusting(null)}>Cancel</Btn>
-              <Btn type="submit" variant="primary" disabled={adjust.isPending}>{adjust.isPending ? 'Saving…' : 'Save'}</Btn>
+              <Btn type="button" onClick={() => setAdjusting(null)}><CrudIcon name="close" /> Cancel</Btn>
+              <Btn type="submit" variant="primary" disabled={adjust.isPending}>
+                {adjust.isPending ? (<Spinner label="Saving…" />) : (<><CrudIcon name="save" /> Save</>)}
+              </Btn>
             </div>
           </form>
-        </div>
+        </Dialog>
       )}
 
       <Card className="p-4">

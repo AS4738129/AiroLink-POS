@@ -440,6 +440,10 @@ function AppShell() {
                 ))}
               </select>
             )}
+            {/* Right-side utility group: POS + frontend-only tools. Visually distinct
+                from the business context (org/branch) on the left; wraps instead of
+                overflowing on narrow screens. */}
+            <span className="ml-auto flex flex-wrap items-center justify-end gap-1.5">
             {allowed('pos', org.role) && (
               <Link
                 to="/pos"
@@ -483,8 +487,9 @@ function AppShell() {
                 <UtilIcon name="bell" />
               </button>
             </span>
-            {/* Desktop user cluster: first name only + Admin label + avatar menu */}
-            <span className="ml-auto hidden items-center gap-2 lg:flex" title={displayName}>
+            {/* Desktop user cluster: first name only + Admin label + avatar menu.
+                Inside the right-side utility group, so no second ml-auto. */}
+            <span className="hidden items-center gap-2 border-l border-brand-100 pl-2 lg:flex" title={displayName}>
               <strong className="max-w-[12rem] truncate text-sm font-extrabold tracking-tight text-ink-900">{firstName}</strong>
               <span className="rounded-full bg-brand-50 px-2 py-0.5 text-xs font-semibold capitalize text-brand-800 ring-1 ring-inset ring-brand-200">{roleLabel(org.role)}</span>
               <span className="relative">
@@ -518,8 +523,9 @@ function AppShell() {
                 )}
               </span>
             </span>
-            {/* Compact controls (mobile/tablet): profile + sign out stay reachable without overflow */}
-            <span className="ml-auto flex items-center gap-2 lg:hidden">
+            {/* Compact controls (mobile/tablet): profile + sign out stay reachable without overflow.
+                Border-l keeps the user area distinct from the utility group. */}
+            <span className="flex items-center gap-2 border-l border-brand-100 pl-2 lg:hidden">
               <button
                 onClick={() => setProfileOpen(true)}
                 aria-label="Edit profile"
@@ -534,6 +540,7 @@ function AppShell() {
               >
                 Sign out
               </button>
+            </span>
             </span>
           </div>
           {/* Utility panel: one compact popover for calculator / calendar / notifications */}

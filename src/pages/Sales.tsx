@@ -7,7 +7,7 @@ import { allowed } from '../lib/permissions'
 import { METHODS } from '../lib/payments'
 import { ReceiptDialog } from '../components/ReceiptDialog'
 import {
-  Btn, EmptyState, Notice, PageHeaderOnDark, Spinner, StatusBadge,
+  Btn, Card, EmptyState, Notice, PageHeaderOnDark, RowAction, Spinner, StatusBadge,
   TableShell, rowCls, selectCls, tdCls, thCls, inputCls, filterBarCls, pageCanvasCls,
 } from '../components/ui'
 
@@ -80,11 +80,11 @@ export default function Sales() {
             <tr><td className="p-4 text-red-700" colSpan={8}>
               Could not load sales.<br />
               <span className="font-mono text-xs">{errorDetail(list.error)}</span>{' '}
-              <button className="font-medium underline" onClick={() => list.refetch()}>Retry</button>
+              <RowAction icon="refresh" onClick={() => list.refetch()}>Retry</RowAction>
             </td></tr>
           )}
           {list.data && list.data.rows.length === 0 && (
-            <tr><td colSpan={8}><EmptyState title="No sales match." hint="Try widening the date range or clearing the filters." /></td></tr>
+            <tr><td colSpan={8}><EmptyState title={receiptQ.trim() || from || to || branchId || customerId || method || status ? 'No sales match these filters.' : 'No sales yet.'} hint={receiptQ.trim() || from || to || branchId || customerId || method || status ? 'Try widening the date range or clearing the filters.' : 'Completed sales from the POS will appear here.'} /></td></tr>
           )}
           {list.data?.rows.map((r) => (
             <tr key={r.id} className={`${rowCls} ${r.status === 'void' ? 'text-slate-500' : ''}`}>
@@ -95,7 +95,7 @@ export default function Sales() {
               <td className={tdCls}>{r.customers?.name ?? 'Walk-in'}</td>
               <td className={`${tdCls} whitespace-nowrap font-medium`}>{org!.currency} {Number(r.total).toFixed(2)}</td>
               <td className={tdCls}><StatusBadge tone={payTone(r)}>{payStatus(r)}</StatusBadge></td>
-              <td className={tdCls}><button className="font-medium text-brand-700 hover:underline" onClick={() => setOpen(r)}>View / reprint</button></td>
+              <td className={`${tdCls} whitespace-nowrap`}><RowAction icon="view" onClick={() => setOpen(r)}>View / reprint</RowAction></td>
             </tr>
           ))}
         </tbody>
@@ -110,14 +110,18 @@ export default function Sales() {
           <ReceiptDialog saleId={open.id} onClose={() => setOpen(null)} />
           {canVoid && open.status === 'completed' && (
             <div className="no-print fixed bottom-4 left-1/2 z-20 -translate-x-1/2">
-              <Btn
-                variant="danger"
-                disabled={voidSale.isPending}
-                onClick={() => { if (confirm(`Void receipt ${open.receipt_no}? Stock is restored and any credit reversed. This cannot be undone.`)) voidSale.mutate(open) }}
-                className="shadow-lg"
-              >
-                {voidSale.isPending ? 'Voiding…' : `Void ${open.receipt_no}`}
-              </Btn>
+              <Card className="flex items-center gap-2 px-3 py-2 shadow-lg">
+                <span className="hidden text-xs text-slate-500 sm:block">Void restores stock; cash refunds are manual.</span>
+                <Btn
+                  variant="danger"
+                  disabled={voidSale.isPending}
+                  title="Voids this sale: stock is restored and any credit reversed (cannot be undone)"
+                  onClick={() => { if (confirm(`Void receipt ${open.receipt_no}? Stock is restored and any credit reversed. This cannot be undone.`)) voidSale.mutate(open) }}
+                  className="shadow-lg"
+                >
+                  {voidSale.isPending ? 'Voiding…' : `Void ${open.receipt_no}`}
+                </Btn>
+              </Card>
             </div>
           )}
         </div>

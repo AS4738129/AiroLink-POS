@@ -5,7 +5,7 @@ import { supabase, friendly } from '../lib/supabase'
 import { useAuth } from '../features/auth/AuthProvider'
 import { allowed } from '../lib/permissions'
 import {
-  Btn, Card, EmptyState, Field, Notice, PageHeaderOnDark, Spinner, StatusBadge,
+  Btn, Card, CrudIcon, EmptyState, Field, Notice, PageHeaderOnDark, Pager, RowAction, Spinner, StatusBadge,
   TableShell, inputCls, rowCls, selectCls, tdCls, thCls, filterBarCls, pageCanvasCls,
 } from '../components/ui'
 
@@ -95,8 +95,15 @@ export default function Products() {
     setErrs({}); save.mutate(p.data, { onSuccess: () => f.reset() })
   }
   const sortHeader = (key: SortKey, label: string) => (
-    <th className={`${thCls} cursor-pointer select-none hover:text-brand-700`} onClick={() => { if (sort === key) setDir(dir === 'asc' ? 'desc' : 'asc'); else { setSort(key); setDir('asc') } }} aria-sort={sort === key ? (dir === 'asc' ? 'ascending' : 'descending') : undefined}>
-      {label}{sort === key ? (dir === 'asc' ? ' ▲' : ' ▼') : ''}
+    <th className={thCls} aria-sort={sort === key ? (dir === 'asc' ? 'ascending' : 'descending') : undefined}>
+      <button
+        type="button"
+        onClick={() => { if (sort === key) setDir(dir === 'asc' ? 'desc' : 'asc'); else { setSort(key); setDir('asc') } }}
+        aria-label={`Sort by ${label}`}
+        className="inline-flex cursor-pointer select-none items-center gap-1 uppercase tracking-wide hover:text-brand-700 focus-visible:outline-2 focus-visible:outline-brand-600"
+      >
+        {label}{sort === key ? (dir === 'asc' ? ' ▲' : ' ▼') : ''}
+      </button>
     </th>
   )
   const field = (n: keyof FormValues, label: string, type = 'text', opts?: { step?: string; required?: boolean }) => (
@@ -118,7 +125,7 @@ export default function Products() {
         description="Catalogue, pricing and categories. Stock lives on the Inventory page."
         actions={canEdit ? (
           <Btn variant="primary" onClick={() => { setEditing(null); setErrs({}); setFormOpen((v) => !v) }} aria-expanded={formOpen}>
-            {formOpen ? 'Close form' : '+ Add product'}
+            {formOpen ? (<><CrudIcon name="close" /> Close form</>) : (<><CrudIcon name="add" /> Add product</>)}
           </Btn>
         ) : undefined}
       />
@@ -154,8 +161,13 @@ export default function Products() {
 
       {canEdit && formOpen && (
         <Card className="p-4 sm:p-5">
-          <form key={editing?.id ?? 'new'} onSubmit={submit} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <p className="col-span-full text-sm font-semibold text-slate-900">{editing ? `Editing ${editing.name}` : 'Add a product'}</p>
+          <form key={editing?.id ?? 'new'} onSubmit={submit} className="grid items-start gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <p className="col-span-full border-b border-brand-100/70 pb-2 text-sm font-semibold text-slate-900">
+              {editing ? `Editing ${editing.name}` : 'Add a product'}
+              <span className="mt-0.5 block text-xs font-normal text-slate-500">
+                {editing ? 'Update the product details, then save.' : 'Describe the product once — its SKU is assigned automatically after adding.'}
+              </span>
+            </p>
             {field('name', 'Name', 'text', { required: true })}
             {field('barcode', 'Barcode (optional)')}
             {editing && (
@@ -166,8 +178,8 @@ export default function Products() {
               </p>
             )}
             <Field label="Category">
-              <select name="category_id" defaultValue={editing?.category_id ?? ''} className={selectCls + ' w-full'}>
-                <option value="">Uncategorized</option>
+              <select name="category_id" defaultValue={editing?.category_id ?? ''} className={selectCls + ' w-full'} disabled={categories.isLoading}>
+                <option value="">{categories.isLoading ? 'Loading categories…' : 'Uncategorized'}</option>
                 {categories.data?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </Field>
@@ -183,12 +195,12 @@ export default function Products() {
             </label>
             <div className="flex items-end gap-2 sm:col-span-2 lg:col-span-3">
               <Btn variant="primary" disabled={save.isPending}>
-                {save.isPending ? 'Saving…' : editing ? 'Save changes' : 'Add product'}
+                {save.isPending ? (<><Spinner label="Saving…" /></>) : editing ? (<><CrudIcon name="save" /> Save changes</>) : (<><CrudIcon name="add" /> Add product</>)}
               </Btn>
               {editing ? (
-                <Btn type="button" onClick={() => { setEditing(null); setFormOpen(false) }}>Cancel</Btn>
+                <Btn type="button" onClick={() => { setEditing(null); setFormOpen(false) }}><CrudIcon name="close" /> Cancel</Btn>
               ) : (
-                <Btn type="button" onClick={() => setFormOpen(false)}>Close</Btn>
+                <Btn type="button" onClick={() => setFormOpen(false)}><CrudIcon name="close" /> Close</Btn>
               )}
             </div>
           </form>
@@ -224,11 +236,12 @@ export default function Products() {
           {list.isLoading && <tr><td className="p-4" colSpan={6}><Spinner label="Loading products…" /></td></tr>}
           {list.isError && (
             <tr><td className="p-4 text-red-700" colSpan={6}>
-              Could not load products. <button className="font-medium underline" onClick={() => list.refetch()}>Retry</button>
+              Could not load products.{' '}
+              <RowAction icon="refresh" onClick={() => list.refetch()}>Retry</RowAction>
             </td></tr>
           )}
           {list.data && list.data.rows.length === 0 && (
-            <tr><td colSpan={6}><EmptyState title="No products match." hint="Try a different search or filter — or add a product above." /></td></tr>
+            <tr><td colSpan={6}><EmptyState title={q.trim() || categoryFilter || statusFilter !== 'all' ? 'No products match these filters.' : 'No products yet.'} hint={q.trim() || categoryFilter || statusFilter !== 'all' ? 'Try a different search or filter — or clear them to see everything.' : 'Add your first product above to start selling.'} /></td></tr>
           )}
           {list.data?.rows.map((p) => (
             <tr key={p.id} className={rowCls}>
@@ -241,23 +254,25 @@ export default function Products() {
               </td>
               <td className={`${tdCls} whitespace-nowrap`}>
                 {canEdit && (
-                  <>
-                    <button className="font-medium text-brand-700 hover:underline" onClick={() => { setEditing(p); setErrs({}); setFormOpen(true) }}>Edit</button>
-                    <button className="ml-3 font-medium text-brand-700 hover:underline" onClick={() => toggle.mutate(p)}>
+                  <span className="inline-flex items-center gap-1">
+                    <RowAction icon="edit" onClick={() => { setEditing(p); setErrs({}); setFormOpen(true) }}>Edit</RowAction>
+                    <RowAction
+                      icon={p.is_active ? 'deactivate' : 'activate'}
+                      danger={p.is_active}
+                      disabled={toggle.isPending}
+                      title={p.is_active ? 'Deactivates the product (keeps its history)' : 'Reactivates the product'}
+                      onClick={() => toggle.mutate(p)}
+                    >
                       {p.is_active ? 'Deactivate' : 'Activate'}
-                    </button>
-                  </>
+                    </RowAction>
+                  </span>
                 )}
               </td>
             </tr>
           ))}
         </tbody>
       </TableShell>
-      <div className="flex items-center gap-3 text-sm text-slate-600">
-        <Btn disabled={page === 0} onClick={() => setPage(page - 1)}>Previous</Btn>
-        <span>Page {page + 1} of {Math.max(1, Math.ceil((list.data?.count ?? 0) / PAGE))}</span>
-        <Btn disabled={(page + 1) * PAGE >= (list.data?.count ?? 0)} onClick={() => setPage(page + 1)}>Next</Btn>
-      </div>
+      <Pager page={page} total={list.data?.count ?? 0} pageSize={PAGE} onPrev={() => setPage(page - 1)} onNext={() => setPage(page + 1)} />
     </div>
   )
 }
