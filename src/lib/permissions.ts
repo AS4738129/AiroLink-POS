@@ -32,5 +32,9 @@ export const access = {
   // cashier sees only customer/sales exports+customer import while an
   // inventory officer sees product/supplier/purchase/inventory sections, etc.
   dataManagement: ['super_admin', 'owner', 'manager', 'cashier', 'inventory_officer', 'accountant'],
+  // Phase 6A — Business Settings shell. Every role may view the settings
+  // (read through the org_sel policy); only owner/super_admin may edit
+  // (the org_upd policy enforces it, the page gates the form too).
+  settings: ['super_admin', 'owner', 'manager', 'cashier', 'inventory_officer', 'accountant'],
 } as Record<string, Role[]>
 export const allowed = (feature: string, role?: Role) => !!role && !!access[feature]?.includes(role)

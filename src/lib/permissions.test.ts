@@ -53,6 +53,12 @@ it('data management shell is visible to every role; datasets stay gated inside',
   }
   expect(allowed('dataManagement', undefined)).toBe(false)
 })
+it('business settings shell is visible to every role; editing stays gated inside', () => {
+  for (const r of ['super_admin', 'owner', 'manager', 'cashier', 'inventory_officer', 'accountant'] as const) {
+    expect(allowed('settings', r)).toBe(true)
+  }
+  expect(allowed('settings', undefined)).toBe(false)
+})
 it('only owners/managers/super admins may void; cashiers may not', () => {
   for (const r of ['super_admin', 'owner', 'manager'] as const) expect(allowed('voidSales', r)).toBe(true)
   for (const r of ['cashier', 'accountant', 'inventory_officer'] as const) expect(allowed('voidSales', r)).toBe(false)
