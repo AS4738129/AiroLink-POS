@@ -227,13 +227,13 @@ export default function Pos() {
             <fieldset className="space-y-2">
               <legend className="text-sm font-medium text-slate-700">Payment</legend>
               {lines.map((l, i) => (
-                <div key={i} className="flex gap-2">
+                <div key={i} className="flex flex-wrap gap-2">
                   <select aria-label={`Payment method ${i + 1}`} value={l.method} onChange={(e) => setLine(i, { method: e.target.value as Method })} className={`${selectCls} shrink-0`}>
                     {METHODS.map(([v, lab]) => <option key={v} value={v}>{lab}</option>)}
                   </select>
                   <input aria-label={`Payment amount ${i + 1}`} type="number" min={0} step="any" value={l.amount} onChange={(e) => setLine(i, { amount: e.target.value })} placeholder="Amount" className={`${inputCls} min-w-0 flex-1`} />
-                  <button type="button" aria-label="Fill remaining" title="Fill the remaining balance" className="shrink-0 rounded-lg border border-brand-100 px-2 text-xs font-medium text-brand-800 hover:bg-brand-50" onClick={() => setLine(i, { amount: String(r2(Math.max(t.total - (sum.applied - (Number(l.amount) || 0)), 0))) })}>Rest</button>
-                  {lines.length > 1 && <button type="button" aria-label={`Remove payment ${i + 1}`} className="shrink-0 rounded px-1.5 text-red-700 hover:bg-red-50" onClick={() => setLines((ls) => ls.filter((_, k) => k !== i))}>✕</button>}
+                  <button type="button" aria-label="Fill remaining" title="Fill the remaining balance" className="min-h-[44px] shrink-0 rounded-lg border border-brand-100 px-3 py-2 text-xs font-medium text-brand-800 hover:bg-brand-50" onClick={() => setLine(i, { amount: String(r2(Math.max(t.total - (sum.applied - (Number(l.amount) || 0)), 0))) })}>Rest</button>
+                  {lines.length > 1 && <button type="button" aria-label={`Remove payment ${i + 1}`} className="min-h-[44px] min-w-[44px] shrink-0 rounded px-1.5 text-red-700 hover:bg-red-50" onClick={() => setLines((ls) => ls.filter((_, k) => k !== i))}>✕</button>}
                 </div>
               ))}
               <button type="button" onClick={() => setLines((ls) => [...ls, { method: 'momo', amount: '' }])} className="text-sm font-medium text-brand-700 hover:underline">+ Split payment</button>
@@ -257,15 +257,16 @@ export default function Pos() {
               </Notice>
             )}
             {msg && <Notice tone={msg.ok ? 'ok' : 'err'}>{msg.t}</Notice>}
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Btn
                 onClick={() => { setCart([]); setDiscount(0); setLines([{ method: 'cash', amount: '' }]); setCashReceived(''); setMsg(null) }}
                 disabled={cart.length === 0 && !discount && !cashReceived && !msg}
                 title="Empties the cart (nothing is recorded)"
+                className="min-h-[44px]"
               >
                 <CrudIcon name="close" /> Clear
               </Btn>
-              <Btn variant="primary" disabled={!canPay} title={!branch ? 'Select a branch to check out' : needsCustomer && !customer ? 'Select a customer to sell the unpaid remainder on credit' : 'Record this sale'} onClick={() => void pay()} className="flex-1 py-2.5 text-base">
+              <Btn variant="primary" disabled={!canPay} title={!branch ? 'Select a branch to check out' : needsCustomer && !customer ? 'Select a customer to sell the unpaid remainder on credit' : 'Record this sale'} onClick={() => void pay()} className="min-h-[44px] min-w-0 flex-1 py-2.5 text-base">
                 {busy ? (<Spinner label="Recording sale…" />) : `Complete sale · ${money(t.total)}`}
               </Btn>
             </div>

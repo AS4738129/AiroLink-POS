@@ -26,6 +26,14 @@ body {
   color: #0f172a;
 }
 
+/* Mobile safety net: page-level horizontal overflow is never wanted.
+   Inner table regions keep their own controlled overflow-x (TableShell),
+   and `clip` (unlike `hidden`) does not break sticky descendants. */
+html, body {
+  max-width: 100%;
+  overflow-x: clip;
+}
+
 /* Branded auth background: deep navy with restrained sea-blue radial glows
    (technology feel without brightness/distraction). */
 .auth-bg {

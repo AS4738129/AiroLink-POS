@@ -106,7 +106,7 @@ export default function Suppliers() {
             {field('phone', 'Phone')}
             {field('email', 'Email', 'email')}
             {field('address', 'Address')}
-            <div className="flex items-end gap-2 sm:col-span-2 lg:col-span-3">
+            <div className="flex min-w-0 flex-wrap items-end gap-2 sm:col-span-2 lg:col-span-3">
               <Btn variant="primary" disabled={save.isPending}>
                 {save.isPending ? (<Spinner label="Saving…" />) : editing ? (<><CrudIcon name="save" /> Save changes</>) : (<><CrudIcon name="add" /> Add supplier</>)}
               </Btn>
@@ -185,7 +185,7 @@ export default function Suppliers() {
               <div key={k} className="flex justify-between gap-3"><dt className="text-slate-500">{k}</dt><dd className="font-medium text-slate-900">{v || '—'}</dd></div>
             ))}
           </dl>
-          <div className="flex justify-end gap-2">
+          <div className="flex min-w-0 flex-wrap justify-end gap-2">
             <Btn type="button" onClick={() => setDetail(null)}><CrudIcon name="close" /> Close</Btn>
             {canEdit && <Btn variant="primary" onClick={() => { setEditing(detail); setErrs({}); setFormOpen(true); setDetail(null) }}><CrudIcon name="edit" /> Edit</Btn>}
           </div>

@@ -11,7 +11,7 @@ export function ReceiptDialog({ receiptNo, saleId, change, onClose }: { receiptN
   return (
     <div className="fixed inset-0 z-10 flex items-start justify-center overflow-y-auto bg-slate-900/50 p-4" onClick={onClose}>
       <div
-        className="w-full max-w-md space-y-3 rounded-2xl bg-slate-100 p-4 shadow-xl"
+        className="w-full max-w-md space-y-3 rounded-2xl bg-slate-100 p-4 shadow-xl min-w-0"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -40,7 +40,7 @@ export function ReceiptDialog({ receiptNo, saleId, change, onClose }: { receiptN
           </div>
         )}
         {q.data && <ReceiptView r={{ ...q.data, change }} />}
-        <div className="no-print flex justify-end gap-2">
+        <div className="no-print flex flex-wrap justify-end gap-2">
           <Btn onClick={onClose} className="bg-white"><CrudIcon name="close" /> Close</Btn>
           <Btn variant="primary" disabled={!q.data} onClick={() => window.print()}><CrudIcon name="print" /> Print</Btn>
         </div>

@@ -13,6 +13,9 @@ import Sales from './pages/Sales'
 import Customers from './pages/Customers'
 import Suppliers from './pages/Suppliers'
 import Purchases from './pages/Purchases'
+import Expenses from './pages/Expenses'
+import Reports from './pages/Reports'
+import DataManagement from './pages/DataManagement'
 import { ContextCacheSync } from './components/ContextCacheSync'
 import { BrandMark, Btn, Field, Notice, Spinner, inputCls } from './components/ui'
 
@@ -30,7 +33,7 @@ export default function App() {
 }
 
 // Lightweight inline SVG icons (decorative; adjacent text is the label). No icon dependency.
-type NavIconName = 'dashboard' | 'pos' | 'products' | 'inventory' | 'sales' | 'customers' | 'suppliers' | 'purchases'
+type NavIconName = 'dashboard' | 'pos' | 'products' | 'inventory' | 'sales' | 'customers' | 'suppliers' | 'purchases' | 'expenses' | 'reports' | 'data'
 function NavIcon({ name, className = 'size-5 shrink-0' }: { name: NavIconName; className?: string }) {
   const common: SVGProps<SVGSVGElement> = { 'aria-hidden': true, fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round', viewBox: '0 0 24 24', className }
   switch (name) {
@@ -50,6 +53,12 @@ function NavIcon({ name, className = 'size-5 shrink-0' }: { name: NavIconName; c
       return (<svg {...common}><path d="M3 7h11v8H3zM14 10h4l3 3v2h-7z" /><circle cx="7" cy="17.5" r="1.8" /><circle cx="17" cy="17.5" r="1.8" /></svg>)
     case 'purchases':
       return (<svg {...common}><rect x="5" y="4" width="14" height="17" rx="2" /><path d="M9 4a3 3 0 0 1 6 0M9 11h6M9 15h6" /></svg>)
+    case 'expenses':
+      return (<svg {...common}><path d="M4 7h16M4 7v12h16V7" /><path d="M4 7l2-3h12l2 3M9 11h6" /></svg>)
+    case 'reports':
+      return (<svg {...common}><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" /></svg>)
+    case 'data':
+      return (<svg {...common}><path d="M12 3c2.8 0 5 1.1 5 2.5S14.8 8 12 8 7 6.9 7 5.5 9.2 3 12 3z" /><path d="M7 5.5v6C7 12.9 9.2 14 12 14s5-1.1 5-2.5v-6" /><path d="M7 11.5v6c0 1.4 2.2 2.5 5 2.5s5-1.1 5-2.5v-6" /></svg>)
     default:
       return null
   }
@@ -64,6 +73,9 @@ const NAV: { to: string; label: string; feature: string; icon: NavIconName }[] =
   { to: '/customers', label: 'Customers', feature: 'customers', icon: 'customers' },
   { to: '/suppliers', label: 'Suppliers', feature: 'suppliers', icon: 'suppliers' },
   { to: '/purchases', label: 'Purchases', feature: 'purchases', icon: 'purchases' },
+  { to: '/expenses', label: 'Expenses', feature: 'expenses', icon: 'expenses' },
+  { to: '/reports', label: 'Reports', feature: 'reports', icon: 'reports' },
+  { to: '/data', label: 'Data', feature: 'dataManagement', icon: 'data' },
 ]
 
 function navCls({ isActive }: { isActive: boolean }) {
@@ -355,6 +367,8 @@ function AppShell() {
   const customersAllowed = allowed('customers', org.role)
   const suppliersAllowed = allowed('suppliers', org.role)
   const purchasesAllowed = allowed('purchases', org.role)
+  const expensesAllowed = allowed('expenses', org.role)
+  const reportsAllowed = allowed('reports', org.role)
   const items = NAV.filter((n) => allowed(n.feature, org.role))
   // Display-only: prefer the sign-up full name, fall back to the account email. No auth/org logic changes.
   const meta = session.user.user_metadata as { full_name?: unknown } | undefined
@@ -397,7 +411,7 @@ function AppShell() {
             Official AiroLink branding lives in the sidebar BrandMark; the top bar
             shows only the registered organization name (no duplicate product text). */}
         <header className="no-print sticky top-0 z-10 border-b border-brand-100 bg-white/90 shadow-[0_8px_24px_-16px_rgba(28,109,217,0.35)] backdrop-blur">
-          <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2 px-4 py-2.5">
+          <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-2 px-4 py-2.5">
             <button
               className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm font-medium focus-visible:outline-2 focus-visible:outline-brand-600 lg:hidden"
               onClick={() => setMenuOpen((v) => !v)}
@@ -407,12 +421,12 @@ function AppShell() {
               ☰
             </button>
             {orgs.length > 1 ? (
-              <span className="flex min-w-0 items-center gap-1.5">
+              <span className="flex min-w-0 max-w-full items-center gap-1.5">
                 <select
                   aria-label="Business"
                   value={org.id}
                   onChange={(e) => switchOrg(e.target.value)}
-                  className="max-w-[12rem] truncate rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-base font-bold text-ink-900"
+                  className="min-w-0 max-w-[10rem] truncate rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-base font-bold text-ink-900 sm:max-w-[12rem]"
                 >
                   {orgs.map((o) => (
                     <option key={o.id} value={o.id}>{o.name}</option>
@@ -421,8 +435,8 @@ function AppShell() {
                 <ActiveMark />
               </span>
             ) : (
-              <span className="flex min-w-0 items-center gap-1.5">
-                <strong className="max-w-[14rem] truncate text-base font-bold text-ink-900 sm:text-lg" title={org.name}>
+              <span className="flex min-w-0 max-w-full items-center gap-1.5">
+                <strong className="min-w-0 max-w-[10rem] truncate text-base font-bold text-ink-900 sm:max-w-[14rem] sm:text-lg" title={org.name}>
                   {org.name}
                 </strong>
                 <ActiveMark />
@@ -433,7 +447,7 @@ function AppShell() {
                 aria-label="Branch"
                 value={branch?.id ?? ''}
                 onChange={(e) => switchBranch(e.target.value)}
-                className="max-w-[10rem] truncate rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-800"
+                className="w-full min-w-0 max-w-full truncate rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-800 sm:w-auto sm:max-w-[10rem]"
               >
                 {branches.map((b) => (
                   <option key={b.id} value={b.id}>{b.name}</option>
@@ -443,7 +457,7 @@ function AppShell() {
             {/* Right-side utility group: POS + frontend-only tools. Visually distinct
                 from the business context (org/branch) on the left; wraps instead of
                 overflowing on narrow screens. */}
-            <span className="ml-auto flex flex-wrap items-center justify-end gap-1.5">
+            <span className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-1.5">
             {allowed('pos', org.role) && (
               <Link
                 to="/pos"
@@ -546,8 +560,8 @@ function AppShell() {
           {/* Utility panel: one compact popover for calculator / calendar / notifications */}
           {utilOpen && (
             <div className="border-t border-brand-100/60 bg-white px-4 py-3">
-              <div className="mx-auto max-w-6xl">
-                <div className="ml-auto w-full max-w-xs rounded-xl border border-brand-100 bg-white shadow-lg">
+              <div className="mx-auto w-full max-w-6xl">
+                <div className="ml-auto min-w-0 w-full max-w-xs rounded-xl border border-brand-100 bg-white shadow-lg">
                   <div className="flex items-center justify-between gap-2 border-b border-brand-100/70 px-3 py-2">
                     <p className="text-sm font-bold text-ink-900">
                       {utilOpen === 'calc' ? 'Calculator' : utilOpen === 'cal' ? 'Calendar' : 'Notifications'}
@@ -556,7 +570,7 @@ function AppShell() {
                       type="button"
                       onClick={() => setUtilOpen(null)}
                       aria-label="Close panel"
-                      className="rounded-lg px-2 py-0.5 text-sm text-slate-500 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-brand-600"
+                      className="min-h-[44px] min-w-[44px] rounded-lg px-2 py-0.5 text-sm text-slate-500 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-brand-600"
                     >
                       ✕
                     </button>
@@ -636,6 +650,11 @@ function AppShell() {
               <Route path="/customers" element={customersAllowed ? <Customers /> : <Navigate to="/products" />} />
               <Route path="/suppliers" element={suppliersAllowed ? <Suppliers /> : <Navigate to="/products" />} />
               <Route path="/purchases" element={purchasesAllowed ? <Purchases /> : <Navigate to="/products" />} />
+              <Route path="/expenses" element={expensesAllowed ? <Expenses /> : <Navigate to="/products" />} />
+              <Route path="/reports" element={reportsAllowed ? <Reports /> : <Navigate to="/products" />} />
+              {/* Data import/export shells the per-dataset permission gates inside;
+                  the page itself is visible to every role (see dataManagement). */}
+              <Route path="/data" element={<DataManagement />} />
               <Route path="*" element={<Navigate to="/dashboard" />} />
             </Routes>
           )}

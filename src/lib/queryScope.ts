@@ -4,12 +4,14 @@ import type { QueryClient, QueryKey } from '@tanstack/react-query'
 // Roots are classified here so a context switch can invalidate/remove exactly the right entries.
 // ('dashboard-totals' holds organization-wide sales/purchases sums keyed by date range —
 // branch-independent by design, so a branch switch neither removes nor refetches it.)
-export const ORG_ONLY_ROOTS = ['categories', 'products', 'inv-products', 'org-policy', 'customers', 'sale', 'suppliers', 'purchases', 'purchase', 'dashboard-totals'] as const
+export const ORG_ONLY_ROOTS = ['categories', 'products', 'inv-products', 'org-policy', 'customers', 'sale', 'suppliers', 'purchases', 'purchase', 'dashboard-totals', 'expense-categories'] as const
 // Stock/history that also belong to ONE branch: the branch id sits at this key index.
 // ('pos-stock' is POS's private per-branch stock view — registered here so a branch switch drops it too.)
 export const BRANCH_KEYED_ROOTS: Record<string, number> = { branch_inventory: 2, 'pos-stock': 2, 'inv-history': 2 }
 // Not keyed by the active branch, but their content depends on branch stock/sales, so refetch on branch change.
-export const BRANCH_DEPENDENT_ROOTS = ['sales', 'pos-search'] as const
+// ('expenses' + the 'report-*' roots are Phase 5 financial reads: branch-aware like 'sales',
+//  so a branch switch refetches them rather than showing the previous branch's numbers.)
+export const BRANCH_DEPENDENT_ROOTS = ['sales', 'pos-search', 'expenses', 'report-sales', 'report-cogs', 'report-purchases', 'report-expenses', 'report-valuation'] as const
 export const ALL_ROOTS: string[] = [...ORG_ONLY_ROOTS, ...Object.keys(BRANCH_KEYED_ROOTS), ...BRANCH_DEPENDENT_ROOTS]
 
 export type QueryContext = { userId: string | null; orgId: string | null; branchId: string | null }

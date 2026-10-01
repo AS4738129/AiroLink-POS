@@ -6,7 +6,7 @@ await db.exec(`create schema auth; create table auth.users(id uuid primary key d
 create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.sub',true),'')::uuid $$;
 create role anon; create role authenticated; grant usage on schema public, auth to anon, authenticated;`)
 
-for (const file of ['0001_core.sql', '0002_phase1_foundation.sql', '0003_phase2_products_inventory.sql', '0004_phase3_pos_sales.sql', '0005_restrict_helper_execute.sql', '0006_auto_sku.sql', '0007_phase4_suppliers_purchases.sql']) {
+for (const file of ['0001_core.sql', '0002_phase1_foundation.sql', '0003_phase2_products_inventory.sql', '0004_phase3_pos_sales.sql', '0005_restrict_helper_execute.sql', '0006_auto_sku.sql', '0007_phase4_suppliers_purchases.sql', '0008_phase5_expenses_reports.sql']) {
   let sql = readFileSync(new URL(`../migrations/${file}`, import.meta.url), 'utf8')
   if (file === '0001_core.sql') sql = sql.replace('create extension if not exists pgcrypto;', '')
   await db.exec(sql)
@@ -294,7 +294,7 @@ const legacyOrg = (await as2(legacyUser, () => db2.query(`select create_organiza
 const legacyProduct = (await as2(legacyUser, () => db2.query(`insert into products(org_id,sku,name,cost_price,selling_price,min_stock) values ('${legacyOrg}','L1','Legacy Item',10,50,3) returning id`))).rows[0].id
 await as2(legacyUser, () => db2.query(`insert into inventory_transactions(org_id,product_id,qty_change,reason) values ('${legacyOrg}','${legacyProduct}',20,'opening')`))
 await as2(legacyUser, () => db2.query(`select complete_sale($1,$2::jsonb,$3::jsonb)`, [legacyOrg, JSON.stringify([{ product_id: legacyProduct, qty: 2 }]), JSON.stringify([{ method: 'cash', amount: 100 }])]))
-for (const file of ['0002_phase1_foundation.sql', '0003_phase2_products_inventory.sql', '0004_phase3_pos_sales.sql', '0005_restrict_helper_execute.sql', '0006_auto_sku.sql', '0007_phase4_suppliers_purchases.sql'])
+for (const file of ['0002_phase1_foundation.sql', '0003_phase2_products_inventory.sql', '0004_phase3_pos_sales.sql', '0005_restrict_helper_execute.sql', '0006_auto_sku.sql', '0007_phase4_suppliers_purchases.sql', '0008_phase5_expenses_reports.sql'])
   await db2.exec(readFileSync(new URL(`../migrations/${file}`, import.meta.url), 'utf8'))
 await db2.exec(`grant select,insert,update,delete on all tables in schema public to authenticated;`)  // covers tables created by later migrations (e.g. branch_inventory)
 ok('[regression] an organization that pre-dates branches/subscriptions gets a main branch on upgrade', (await db2.query(`select count(*) c from branches where org_id='${legacyOrg}' and is_main`)).rows[0].c == 1)
@@ -394,6 +394,84 @@ ok('receiving is blocked while the subscription is suspended, stock untouched', 
 await db.exec(`update subscriptions set status='trialing' where org_id='${oa}'`)
 await as(a, () => db.query(`select receive_purchase($1,$2)`, [oa, suspDraft]))
 ok('receiving works again once the subscription is reactivated', (await db.query(`select status from purchases where id='${suspDraft}'`)).rows[0].status === 'received' && await stockAt(branchA, pid2) === stockBefore + 3)
+
+// ── Phase 5: expenses + expense categories ──────────────────────────────────
+// Reports themselves need no schema: they read persisted sales.total (non-void),
+// purchases.total (received only), sale_items qty x cost_price snapshots, and
+// branch_inventory x products.cost_price — all covered by existing RLS.
+const acct = (await db.query(`insert into auth.users default values returning id`)).rows[0].id
+await as(a, () => db.query(`insert into organization_members(org_id,user_id,role) values ('${oa}','${acct}','accountant')`))
+const catRent = (await as(a, () => db.query(`insert into expense_categories(org_id,name) values ('${oa}','Rent') returning id`))).rows[0].id
+const catUtil = (await as(a, () => db.query(`insert into expense_categories(org_id,name) values ('${oa}','Utilities') returning id`))).rows[0].id
+ok('owner can create expense categories', !!(await db.query(`select id from expense_categories where id='${catRent}'`)).rows[0])
+ok('category names are unique per organization', !!(await rej(as(a, () => db.query(`insert into expense_categories(org_id,name) values ('${oa}','Rent')`)))))
+ok('org B cannot see org A categories', (await as(b, () => db.query(`select count(*) c from expense_categories where org_id='${oa}'`))).rows[0].c == 0)
+ok('cashier cannot create a category (financial role required)', !!(await rej(as(d, () => db.query(`insert into expense_categories(org_id,name) values ('${oa}','Nope')`)))))
+ok('inventory officer cannot create a category', !!(await rej(as(c, () => db.query(`insert into expense_categories(org_id,name) values ('${oa}','Nope')`)))))
+await as(acct, () => db.query(`insert into expense_categories(org_id,name) values ('${oa}','Transport')`))
+ok('accountant can create a category', (await db.query(`select count(*) c from expense_categories where org_id='${oa}' and name='Transport'`)).rows[0].c == 1)
+ok('cashier cannot read categories at the database level', (await as(d, () => db.query(`select count(*) c from expense_categories where org_id='${oa}'`))).rows[0].c == 0)
+ok('inventory officer cannot read categories at the database level', (await as(c, () => db.query(`select count(*) c from expense_categories where org_id='${oa}'`))).rows[0].c == 0)
+
+const exp1 = (await as(a, () => db.query(`insert into expenses(org_id,branch_id,category_id,amount,description,payment_method,expense_date) values ('${oa}','${branchA}','${catRent}',1000,'September rent','bank','2026-09-01') returning id`))).rows[0].id
+ok('owner can create an expense', !!(await db.query(`select id from expenses where id='${exp1}'`)).rows[0])
+ok('creating an expense is audited', (await db.query(`select count(*) c from audit_logs where entity_id='${exp1}' and action='expense.create'`)).rows[0].c == 1)
+ok('negative expense amounts are rejected at the database level', !!(await rej(as(a, () => db.query(`insert into expenses(org_id,branch_id,category_id,amount,expense_date) values ('${oa}','${branchA}','${catRent}',-50,'2026-09-01')`)))))
+ok('zero expense amounts are rejected at the database level', !!(await rej(as(a, () => db.query(`insert into expenses(org_id,branch_id,category_id,amount,expense_date) values ('${oa}','${branchA}','${catRent}',0,'2026-09-01')`)))))
+ok('invalid payment methods are rejected', !!(await rej(as(a, () => db.query(`insert into expenses(org_id,branch_id,category_id,amount,expense_date,payment_method) values ('${oa}','${branchA}','${catRent}',10,'2026-09-01','crypto')`)))))
+await as(a, () => db.query(`update expenses set amount=1200 where id='${exp1}'`))
+ok('owner can edit an expense', Number((await db.query(`select amount from expenses where id='${exp1}'`)).rows[0].amount) === 1200)
+ok('editing an expense is audited', (await db.query(`select count(*) c from audit_logs where entity_id='${exp1}' and action='expense.update'`)).rows[0].c == 1)
+await as(a, () => db.query(`insert into expenses(org_id,branch_id,category_id,amount,expense_date) values ('${oa}','${branchA}','${catUtil}',200,'2026-09-05')`))
+await as(a, () => db.query(`insert into expenses(org_id,branch_id,category_id,amount,expense_date) values ('${oa}','${branchA2}','${catUtil}',75,'2026-09-10')`))
+await as(acct, () => db.query(`insert into expenses(org_id,branch_id,category_id,amount,expense_date) values ('${oa}','${branchA}','${catUtil}',25,'2026-09-12')`))
+ok('accountant can create an expense', (await db.query(`select count(*) c from expenses where org_id='${oa}' and amount=25`)).rows[0].c == 1)
+ok('cashier cannot create an expense', !!(await rej(as(d, () => db.query(`insert into expenses(org_id,branch_id,category_id,amount,expense_date) values ('${oa}','${branchA2}','${catUtil}',10,'2026-09-01')`)))))
+ok('inventory officer cannot create an expense (no branch assignment either)', !!(await rej(as(c, () => db.query(`insert into expenses(org_id,branch_id,category_id,amount,expense_date) values ('${oa}','${branchA}','${catUtil}',10,'2026-09-01')`)))))
+ok('user B cannot create an expense in org A', !!(await rej(as(b, () => db.query(`insert into expenses(org_id,branch_id,category_id,amount,expense_date) values ('${oa}','${branchA}','${catRent}',10,'2026-09-01')`)))))
+ok('cross-tenant branch rejected (org B branch in org A expense)', !!(await rej(as(a, () => db.query(`insert into expenses(org_id,branch_id,category_id,amount,expense_date) values ('${oa}','${branchB}','${catRent}',10,'2026-09-01')`)))))
+const catB = (await as(b, () => db.query(`insert into expense_categories(org_id,name) values ('${ob}','Rent') returning id`))).rows[0].id
+ok('cross-tenant category rejected (org B category in org A expense)', !!(await rej(as(a, () => db.query(`insert into expenses(org_id,branch_id,category_id,amount,expense_date) values ('${oa}','${branchA}','${catB}',10,'2026-09-01')`)))))
+ok('org B sees none of org A expenses', (await as(b, () => db.query(`select count(*) c from expenses where org_id='${oa}'`))).rows[0].c == 0)
+ok('cashier sees zero expense rows at the database level', (await as(d, () => db.query(`select count(*) c from expenses`))).rows[0].c == 0)
+ok('branch-scoped officer sees no expenses at an unassigned branch', (await as(c, () => db.query(`select count(*) c from expenses where branch_id='${branchA}'`))).rows[0].c == 0)
+ok('manager can edit an expense', !(await rej(as(a, () => db.query(`insert into organization_members(org_id,user_id,role) values ('${oa}','${e}','manager')`)))) && true)
+await as(e, () => db.query(`update expenses set description='edited by manager' where id='${exp1}'`))
+ok('manager edit lands', (await db.query(`select description from expenses where id='${exp1}'`)).rows[0].description === 'edited by manager')
+const mgrDel = await as(e, () => db.query(`delete from expenses where id='${exp1}'`))
+ok('manager cannot delete an expense (owner/accountant only)', mgrDel.affectedRows === 0 && !!(await db.query(`select id from expenses where id='${exp1}'`)).rows[0])
+const cashDel = await as(d, () => db.query(`delete from expenses where id='${exp1}'`))
+ok('cashier cannot delete an expense', cashDel.affectedRows === 0 && !!(await db.query(`select id from expenses where id='${exp1}'`)).rows[0])
+await as(acct, () => db.query(`delete from expenses where amount=25`))
+ok('accountant can delete an expense', (await db.query(`select count(*) c from expenses where amount=25`)).rows[0].c == 0)
+ok('deleting an expense is audited', (await db.query(`select count(*) c from audit_logs where action='expense.delete'`)).rows[0].c == 1)
+ok('deleting a category with expenses is rejected (history is never orphaned)', !!(await rej(as(a, () => db.query(`delete from expense_categories where id='${catUtil}'`)))))
+await as(a, () => db.query(`delete from expense_categories where name='Transport'`))
+ok('an unused category can be deleted', (await db.query(`select count(*) c from expense_categories where org_id='${oa}' and name='Transport'`)).rows[0].c == 0)
+
+// Reports read existing persisted data (no new tables/functions needed).
+// All September branchA figures below exclude the branchA2 Utilities 75 by construction.
+ok('report: revenue is SUM(sales.total) for non-void sales (voids excluded)',
+  Number((await db.query(`select coalesce(sum(total),0) s from sales where org_id='${oa}' and status<>'void'`)).rows[0].s) > 0
+  && Number((await db.query(`select coalesce(sum(total),0) s from sales where org_id='${oa}' and status<>'void'`)).rows[0].s)
+    === Number((await db.query(`select coalesce(sum(total),0) s from sales where org_id='${oa}'`)).rows[0].s)
+      - Number((await db.query(`select coalesce(sum(total),0) s from sales where org_id='${oa}' and status='void'`)).rows[0].s))
+ok('report: purchases count received only (drafts/cancelled excluded)',
+  (await db.query(`select count(*) c from purchases where org_id='${oa}' and status='received'`)).rows[0].c >= 2
+  && Number((await db.query(`select coalesce(sum(total),0) s from purchases where org_id='${oa}' and status='received'`)).rows[0].s)
+    === Number((await db.query(`select coalesce(sum(p.total),0) s from purchases p where p.org_id='${oa}' and p.status='received'`)).rows[0].s))
+ok('report: COGS uses historical sale_items snapshots (qty x cost_price), not current product cost',
+  Number((await db.query(`select coalesce(sum(qty*cost_price),0) s from sale_items si join sales s on s.id=si.sale_id where s.org_id='${oa}' and s.status<>'void'`)).rows[0].s) > 0)
+ok('report: an earlier sale keeps its cost snapshot after receive_purchase() repriced the product (Phase 4 guarantee reused)',
+  Number((await db.query(`select cost_price from sale_items where sale_id='${sale2Id}'`)).rows[0].cost_price) === oldSnapshot)
+ok('report: expenses sum for the period (branchA September: 1200 rent + 200 utilities = 1400)',
+  Number((await db.query(`select coalesce(sum(amount),0) s from expenses where org_id='${oa}' and branch_id='${branchA}' and expense_date >= '2026-09-01' and expense_date < '2026-10-01'`)).rows[0].s) === 1400)
+ok('report: branch filter narrows expenses to one branch (branchA2 September = 75)',
+  Number((await db.query(`select coalesce(sum(amount),0) s from expenses where org_id='${oa}' and branch_id='${branchA2}' and expense_date >= '2026-09-01' and expense_date < '2026-10-01'`)).rows[0].s) === 75)
+ok('report: empty periods return zero, not null (COALESCE)',
+  Number((await db.query(`select coalesce(sum(amount),0) s from expenses where org_id='${oa}' and expense_date >= '2020-01-01' and expense_date < '2020-02-01'`)).rows[0].s) === 0)
+ok('report: inventory valuation is current qty x current cost and is non-negative',
+  Number((await db.query(`select coalesce(sum(bi.stock_qty*p.cost_price),0) s from branch_inventory bi join products p on p.id=bi.product_id where bi.org_id='${oa}' and bi.branch_id='${branchA}'`)).rows[0].s) >= 0)
 
 if (failures > 0) { console.log(`\n${failures} test(s) FAILED`); process.exit(1) }
 console.log('\nAll tests passed')

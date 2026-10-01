@@ -115,7 +115,7 @@ export default function Customers() {
                 <span className="text-xs">(updated only by sales and voids)</span>
               </p>
             )}
-            <div className="flex items-end gap-2 sm:col-span-2 lg:col-span-3">
+            <div className="flex min-w-0 flex-wrap items-end gap-2 sm:col-span-2 lg:col-span-3">
               <Btn variant="primary" disabled={save.isPending}>
                 {save.isPending ? (<Spinner label="Saving…" />) : editing ? (<><CrudIcon name="save" /> Save changes</>) : (<><CrudIcon name="add" /> Add customer</>)}
               </Btn>
@@ -200,7 +200,7 @@ export default function Customers() {
             <div className="flex justify-between gap-3"><dt className="text-slate-500">Balance</dt><dd className="font-mono font-semibold text-slate-900">{org!.currency} {Number(detail.balance).toFixed(2)}</dd></div>
             <div className="flex justify-between gap-3"><dt className="text-slate-500">Credit limit</dt><dd className="font-mono font-medium text-slate-900">{org!.currency} {Number(detail.credit_limit).toFixed(2)}</dd></div>
           </dl>
-          <div className="flex justify-end gap-2">
+          <div className="flex min-w-0 flex-wrap justify-end gap-2">
             <Btn type="button" onClick={() => setDetail(null)}><CrudIcon name="close" /> Close</Btn>
             {canEdit && <Btn variant="primary" onClick={() => { setEditing(detail); setErrs({}); setFormOpen(true); setDetail(null) }}><CrudIcon name="edit" /> Edit</Btn>}
           </div>

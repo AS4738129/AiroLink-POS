@@ -173,7 +173,7 @@ export default function Purchases() {
           ) : (
             <div className="space-y-2">
               {lines.map((l, i) => (
-                <div key={i} className="grid grid-cols-[1fr_auto] items-end gap-2 sm:grid-cols-[1fr_7rem_7rem_auto]">
+                <div key={i} className="grid grid-cols-1 items-end gap-2 sm:grid-cols-[1fr_7rem_7rem_auto]">
                   <Field label={i === 0 ? 'Product' : ''}>
                     <select aria-label={`Line ${i + 1} product`} value={l.product_id} onChange={(e) => pickProduct(i, e.target.value)} className={`${selectCls} w-full`}>
                       <option value="">Select a product</option>
@@ -197,7 +197,7 @@ export default function Purchases() {
           )}
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-brand-100 pt-3">
             <p className="text-sm text-slate-600">Total <strong className="font-mono text-base text-ink-900">{org!.currency} {preview.total.toFixed(2)}</strong></p>
-            <div className="flex gap-2">
+            <div className="flex min-w-0 flex-wrap gap-2">
               <Btn type="button" onClick={() => setFormOpen(false)}><CrudIcon name="close" /> Cancel</Btn>
               <Btn variant="primary" disabled={!draftValid || createDraft.isPending} onClick={() => createDraft.mutate()}>
                 {createDraft.isPending ? (<Spinner label="Saving…" />) : (<><CrudIcon name="save" /> Save draft</>)}
@@ -257,7 +257,7 @@ export default function Purchases() {
             {detail.isError && <Notice tone="err">Could not load this purchase.{' '}<RowAction icon="refresh" onClick={() => detail.refetch()}>Retry</RowAction></Notice>}
             {detail.data && (
               <>
-                <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                <dl className="grid grid-cols-1 gap-x-4 gap-y-1 text-sm sm:grid-cols-2">
                   <div className="flex justify-between gap-2"><dt className="text-slate-500">Supplier</dt><dd className="font-medium">{detail.data.purchase.suppliers?.name ?? '—'}</dd></div>
                   <div className="flex justify-between gap-2"><dt className="text-slate-500">Branch</dt><dd className="font-medium">{branchName(detail.data.purchase.branch_id)}</dd></div>
                   <div className="flex justify-between gap-2"><dt className="text-slate-500">Status</dt><dd><StatusBadge tone={statusTone(detail.data.purchase.status)}><span className="capitalize">{detail.data.purchase.status}</span></StatusBadge></dd></div>

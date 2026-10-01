@@ -107,7 +107,7 @@ export function Btn({
 export const inputCls =
   'w-full rounded-lg border border-brand-100 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 shadow-sm transition-colors hover:border-brand-300 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100'
 export const selectCls =
-  'rounded-lg border border-brand-100 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm transition-colors hover:border-brand-300 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100'
+  'max-w-full rounded-lg border border-brand-100 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm transition-colors hover:border-brand-300 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100'
 export const labelCls = 'block text-sm font-medium text-slate-700'
 
 export function Field({
@@ -201,7 +201,7 @@ export function TableShell({ children, label }: { children: ReactNode; label?: s
 export const thCls = 'whitespace-nowrap bg-brand-50/60 p-3 text-left text-xs font-semibold uppercase tracking-wide text-brand-800'
 export const tdCls = 'p-3 align-middle text-slate-800'
 export const rowCls = 'border-t border-brand-100/70 hover:bg-brand-50/50'
-export const filterBarCls = 'flex flex-wrap gap-2 rounded-xl border border-brand-100 bg-white p-3 shadow-[0_1px_2px_rgba(11,37,69,0.05),0_8px_24px_-12px_rgba(28,109,217,0.18)]'
+export const filterBarCls = 'flex flex-col gap-2 rounded-xl border border-brand-100 bg-white p-3 shadow-[0_1px_2px_rgba(11,37,69,0.05),0_8px_24px_-12px_rgba(28,109,217,0.18)] sm:flex-row sm:flex-wrap sm:items-center [&>input]:w-full sm:[&>input]:w-auto [&>select]:w-full sm:[&>select]:w-auto'
 
 // Consistent inline action icons for CRUD tables/dialogs. Decorative only
 // (aria-hidden): the adjacent text label stays the accessible name. No icon

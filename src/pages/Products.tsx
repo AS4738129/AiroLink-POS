@@ -137,11 +137,11 @@ export default function Products() {
           </summary>
           <div className="mt-3 space-y-2">
             {categories.data?.map((c) => (
-              <div key={c.id} className="flex items-center gap-2 text-sm">
+              <div key={c.id} className="flex min-w-0 items-center gap-2 text-sm">
                 <input
                   defaultValue={c.name}
                   aria-label={`Rename category ${c.name}`}
-                  className={`${inputCls} flex-1 py-1`}
+                  className={`${inputCls} min-w-0 flex-1 py-1`}
                   onBlur={(e) => { if (e.target.value.trim() && e.target.value !== c.name) renameCategory.mutate({ id: c.id, name: e.target.value.trim() }) }}
                 />
                 <button className="shrink-0 font-medium text-red-700 hover:underline" onClick={() => { if (confirm(`Delete "${c.name}"? Products keep their other details but lose this category.`)) deleteCategory.mutate(c.id) }}>
@@ -149,9 +149,9 @@ export default function Products() {
                 </button>
               </div>
             ))}
-            <div className="flex gap-2">
-              <input value={newCategory} onChange={(e) => setNewCategory(e.target.value)} placeholder="New category name" aria-label="New category name" className={`${inputCls} flex-1 py-1`} />
-              <Btn disabled={!newCategory.trim() || addCategory.isPending} onClick={() => addCategory.mutate(newCategory.trim())}>
+            <div className="flex min-w-0 gap-2">
+              <input value={newCategory} onChange={(e) => setNewCategory(e.target.value)} placeholder="New category name" aria-label="New category name" className={`${inputCls} min-w-0 flex-1 py-1`} />
+              <Btn disabled={!newCategory.trim() || addCategory.isPending} onClick={() => addCategory.mutate(newCategory.trim())} className="shrink-0">
                 Add
               </Btn>
             </div>
@@ -193,7 +193,7 @@ export default function Products() {
             <label className="flex items-center gap-2 text-sm text-slate-700">
               <input type="checkbox" name="taxable" defaultChecked={editing ? editing.taxable : true} className="size-4 accent-brand-600" /> Taxable
             </label>
-            <div className="flex items-end gap-2 sm:col-span-2 lg:col-span-3">
+            <div className="flex min-w-0 flex-wrap items-end gap-2 sm:col-span-2 lg:col-span-3">
               <Btn variant="primary" disabled={save.isPending}>
                 {save.isPending ? (<><Spinner label="Saving…" /></>) : editing ? (<><CrudIcon name="save" /> Save changes</>) : (<><CrudIcon name="add" /> Add product</>)}
               </Btn>

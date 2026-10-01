@@ -6,10 +6,12 @@ import { errorDetail } from '../lib/errors'
 import { useAuth } from '../features/auth/AuthProvider'
 import { allowed } from '../lib/permissions'
 import { bucketByRange, summarizeRange, type SalePoint } from '../lib/dashboard'
+import { cogsTotal, incomeStatement, sumMoney } from '../lib/finance'
+import { fetchCogsForSales, fetchExpensesInRange } from '../lib/financials'
 import { RANGES, isCustomValid, resolveRange, type CustomRange, type RangeId } from '../lib/dateRange'
 import { Card, EmptyState, Notice, Spinner, StatusBadge, pageCanvasCls, selectCls } from '../components/ui'
 
-type Point = SalePoint & { status: string }
+type Point = SalePoint & { id: string; status: string }
 type PurchasePoint = { created_at: string; total: number | string; status: string }
 type RecentRow = { id: string; receipt_no: string; created_at: string; status: string; total: number; balance_due: number; branch_id: string; customers: { name: string } | null }
 type Product = { id: string; sku: string; name: string }
@@ -69,6 +71,7 @@ export default function Dashboard() {
 
   const showSales = allowed('salesHistory', org?.role)
   const showPurchases = allowed('purchases', org?.role)
+  const showReports = allowed('reports', org?.role)
   const showTotals = showSales || showPurchases
   const scopeKey = branch?.id ?? 'all'
 
@@ -91,7 +94,7 @@ export default function Dashboard() {
       for (let offset = 0; ; offset += PAGE) {
         const { data, error } = await supabase
           .from('sales')
-          .select('created_at,total,status')
+          .select('id,created_at,total,status')
           .eq('org_id', org!.id)
           .gte('created_at', range.start.toISOString())
           .lt('created_at', range.end.toISOString())
@@ -128,11 +131,27 @@ export default function Dashboard() {
     },
   })
 
+  // Phase 5 profit strip: expenses for the same range (by expense_date) plus COGS
+  // from the historical sale_items snapshots of this range's completed sales.
+  // Display-only — revenue/purchases logic above is untouched.
+  const expensesRange = useQuery({ queryKey: ['report-expenses', org!.id, rangeKey, 'all'], enabled: showReports && customReady, staleTime: 0,
+    queryFn: () => fetchExpensesInRange(supabase, org!.id, range),
+  })
+  const cogsRange = useQuery({ queryKey: ['report-cogs', org!.id, rangeKey, 'all'], enabled: showReports && customReady && !!salesRange.data, staleTime: 0,
+    queryFn: () => fetchCogsForSales(supabase, (salesRange.data ?? []).filter((s) => s.status !== 'void').map((s) => s.id)),
+  })
+
   const salesSummary = useMemo(
     () => summarizeRange(salesRange.data ?? [], range.start, range.end),
     [salesRange.data, range],
   )
   const purchaseTotal = useMemo(() => sumTotals(purchasesRange.data ?? []), [purchasesRange.data])
+  const profitStrip = useMemo(() => {
+    const revenue = salesSummary.revenue
+    const cogs = cogsTotal(cogsRange.data ?? [])
+    const expenses = sumMoney(expensesRange.data ?? [], (r) => (r as { amount: number | string }).amount)
+    return incomeStatement({ revenue, cogs, expenses })
+  }, [salesSummary.revenue, cogsRange.data, expensesRange.data])
   // A disabled (role-gated) metric counts as ready so it never blocks the other
   // metric on loading. On a preset switch the new range key has no cached data,
   // so a spinner shows instead of stale totals masquerading as the new range;
@@ -142,7 +161,10 @@ export default function Dashboard() {
   const shownPurchases = !showPurchases ? purchaseTotal : purchasesRange.data !== undefined ? purchaseTotal : null
   const salesPending = showSales && customReady && (salesRange.isLoading || salesRange.isFetching)
   const purchasesPending = showPurchases && customReady && (purchasesRange.isLoading || purchasesRange.isFetching)
-  const totalsPending = salesPending || purchasesPending
+  const profitPending = showReports && customReady && (expensesRange.isLoading || expensesRange.isFetching || cogsRange.isLoading || cogsRange.isFetching)
+  const totalsPending = salesPending || purchasesPending || profitPending
+  // COGS depends on the sales rows: a role without sales visibility counts COGS as ready.
+  const profitReady = !showReports || (expensesRange.data !== undefined && (!showSales || cogsRange.data !== undefined))
 
   const buckets = useMemo(
     () => bucketByRange(salesRange.data ?? [], range.start, range.end),
@@ -200,6 +222,8 @@ export default function Dashboard() {
     allowed('customers', org?.role) && { to: '/customers', title: 'Customers', desc: 'Directory and credit balances', enabled: true },
     allowed('suppliers', org?.role) && { to: '/suppliers', title: 'Suppliers', desc: 'Supplier directory and contacts', enabled: true },
     allowed('purchases', org?.role) && { to: '/purchases', title: 'Purchases', desc: 'Orders, receiving and history', enabled: true },
+    allowed('expenses', org?.role) && { to: '/expenses', title: 'Expenses', desc: 'Spending by branch and category', enabled: true },
+    allowed('reports', org?.role) && { to: '/reports', title: 'Reports', desc: 'Sales, purchases, expenses and profit', enabled: true },
   ].filter((a): a is { to: string; title: string; desc: string; enabled: boolean } => !!a)
 
   const setPreset = (id: RangeId) => {
@@ -265,9 +289,9 @@ export default function Dashboard() {
       {/* Sales & purchases totals — organization-wide, date-filtered */}
       {showTotals && (
         <Card className="p-4 sm:p-5">
-          <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
             <h2 className="text-base font-bold tracking-tight text-ink-900">Sales &amp; Purchases</h2>
-            <div role="group" aria-label="Totals period" className="flex flex-wrap gap-1 rounded-lg bg-brand-50 p-1">
+            <div role="group" aria-label="Totals period" className="flex flex-wrap gap-1 self-start rounded-lg bg-brand-50 p-1 sm:self-auto">
               {RANGES.map((p) => (
                 <button
                   key={p.id}
@@ -283,8 +307,8 @@ export default function Dashboard() {
             </div>
           </div>
           {rangeId === 'custom' && (
-            <div className="mt-3 flex flex-wrap items-end gap-2">
-              <label className="text-xs font-medium text-slate-600">
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
+              <label className="min-w-0 text-xs font-medium text-slate-600">
                 Start date
                 <input
                   type="date"
@@ -292,10 +316,10 @@ export default function Dashboard() {
                   max={custom.endDate || todayStr()}
                   onChange={(e) => setCustom((c) => ({ ...c, startDate: e.target.value }))}
                   aria-label="Custom range start date"
-                  className={`${selectCls} ml-2`}
+                  className={`${selectCls} ml-2 w-auto max-w-full`}
                 />
               </label>
-              <label className="text-xs font-medium text-slate-600">
+              <label className="min-w-0 text-xs font-medium text-slate-600">
                 End date
                 <input
                   type="date"
@@ -304,7 +328,7 @@ export default function Dashboard() {
                   max={todayStr()}
                   onChange={(e) => setCustom((c) => ({ ...c, endDate: e.target.value }))}
                   aria-label="Custom range end date"
-                  className={`${selectCls} ml-2`}
+                  className={`${selectCls} ml-2 w-auto max-w-full`}
                 />
               </label>
               {rangeId === 'custom' && !customReady && (
@@ -315,17 +339,17 @@ export default function Dashboard() {
           <div className="mt-3" aria-live="polite">
             {rangeId === 'custom' && !customReady ? (
               <EmptyState title="Choose a date range." hint="Pick a start and end date to see organization-wide totals." />
-            ) : (showSales && salesRange.isError) || (showPurchases && purchasesRange.isError) ? (
+            ) : (showSales && salesRange.isError) || (showPurchases && purchasesRange.isError) || (showReports && (expensesRange.isError || cogsRange.isError)) ? (
               <QueryProblem
-                error={salesRange.error ?? purchasesRange.error}
-                onRetry={() => { void salesRange.refetch(); void purchasesRange.refetch() }}
-                what="the sales and purchase totals"
+                error={salesRange.error ?? purchasesRange.error ?? expensesRange.error ?? cogsRange.error}
+                onRetry={() => { void salesRange.refetch(); void purchasesRange.refetch(); void expensesRange.refetch(); void cogsRange.refetch() }}
+                what="the sales, purchase and profit totals"
               />
-            ) : shownSales === null || shownPurchases === null ? (
+            ) : shownSales === null || shownPurchases === null || !profitReady ? (
               <p className="py-4 text-center"><Spinner label="Loading totals…" /></p>
             ) : (
               <div className={totalsPending ? 'opacity-60 transition-opacity' : undefined}>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className={showReports ? 'grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5' : 'grid grid-cols-1 gap-3 sm:grid-cols-2'}>
                   {showSales && shownSales && (
                     <div className="rounded-xl border border-brand-100 bg-brand-50/50 p-4">
                       {totalsPending && <p className="mb-1"><Spinner label="Updating totals…" /></p>}
@@ -349,6 +373,32 @@ export default function Dashboard() {
                           : `${purchasesRange.data!.length} received purchase${purchasesRange.data!.length === 1 ? '' : 's'} (organization-wide)`}
                       </p>
                     </div>
+                  )}
+                  {showReports && profitReady && (
+                    <>
+                      <div className="rounded-xl border border-brand-100 bg-brand-50/50 p-4">
+                        {totalsPending && (showSales || showPurchases) && <p className="mb-1" aria-hidden="true">&nbsp;</p>}
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Total Expenses · {range.label}</p>
+                        <p className="mt-1 text-2xl font-extrabold tracking-tight text-ink-900">{money(profitStrip.expenses)}</p>
+                        <p className="mt-0.5 text-xs text-slate-500">
+                          {(expensesRange.data?.length ?? 0) === 0
+                            ? 'No recorded expenses in this period.'
+                            : `${expensesRange.data!.length} expense${expensesRange.data!.length === 1 ? '' : 's'} (organization-wide)`}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-brand-100 bg-brand-50/50 p-4">
+                        {totalsPending && (showSales || showPurchases) && <p className="mb-1" aria-hidden="true">&nbsp;</p>}
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Gross Profit · {range.label}</p>
+                        <p className="mt-1 text-2xl font-extrabold tracking-tight text-ink-900">{money(profitStrip.gross)}</p>
+                        <p className="mt-0.5 text-xs text-slate-500">Revenue minus COGS (historical cost).</p>
+                      </div>
+                      <div className="rounded-xl border border-brand-100 bg-brand-50/50 p-4">
+                        {totalsPending && (showSales || showPurchases) && <p className="mb-1" aria-hidden="true">&nbsp;</p>}
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Net Profit · {range.label}</p>
+                        <p className="mt-1 text-2xl font-extrabold tracking-tight text-ink-900">{money(profitStrip.net)}</p>
+                        <p className="mt-0.5 text-xs text-slate-500">Gross profit minus expenses.</p>
+                      </div>
+                    </>
                   )}
                 </div>
                 <p className="mt-2 text-xs text-slate-500">Organization-wide · all branches.</p>
@@ -426,7 +476,7 @@ export default function Dashboard() {
                 <h2 className="text-base font-bold tracking-tight text-ink-900">Recent sales</h2>
                 <Link to="/sales" className="text-sm font-medium text-brand-700 hover:underline">View all</Link>
               </div>
-              <div className="mt-2">
+              <div className="mt-2 min-w-0">
                 {recent.isLoading ? (
                   <p className="py-6 text-center"><Spinner label="Loading recent sales…" /></p>
                 ) : recent.isError ? (
@@ -436,11 +486,11 @@ export default function Dashboard() {
                 ) : (
                   <ul className="divide-y divide-brand-100/70">
                     {recent.data!.map((r) => (
-                      <li key={r.id} className="flex items-center justify-between gap-3 py-2.5">
-                        <div className="min-w-0">
+                      <li key={r.id} className="flex min-w-0 items-center justify-between gap-3 py-2.5">
+                        <div className="min-w-0 flex-1">
                           <p className="truncate font-mono text-xs text-slate-500">{r.receipt_no}</p>
                           <p className="truncate text-sm font-medium text-slate-800">{r.customers?.name ?? 'Walk-in'} · {branchName(r.branch_id)}</p>
-                          <p className="text-xs text-slate-500">{new Date(r.created_at).toLocaleString()}</p>
+                          <p className="break-words text-xs text-slate-500">{new Date(r.created_at).toLocaleString()}</p>
                         </div>
                         <div className="flex shrink-0 flex-col items-end gap-1">
                           <span className="whitespace-nowrap text-sm font-bold text-ink-900">{money(Number(r.total))}</span>
@@ -475,8 +525,8 @@ export default function Dashboard() {
                   {attention.map((p) => {
                     const out = p.stock_qty <= 0
                     return (
-                      <li key={p.id} className="flex items-center justify-between gap-3 py-2.5">
-                        <div className="min-w-0">
+                      <li key={p.id} className="flex min-w-0 items-center justify-between gap-3 py-2.5">
+                        <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-medium text-slate-800">{p.name}</p>
                           <p className="font-mono text-xs text-slate-500">{p.sku}</p>
                         </div>

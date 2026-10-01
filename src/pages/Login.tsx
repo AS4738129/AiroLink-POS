@@ -39,7 +39,7 @@ export default function Login() {
   return (
     <main className="auth-bg relative grid min-h-screen place-items-center overflow-hidden p-4">
       <div aria-hidden className="auth-grid pointer-events-none absolute inset-0" />
-      <div aria-hidden className="pointer-events-none absolute -top-28 left-1/2 h-72 w-[42rem] -translate-x-1/2 rounded-full bg-brand-500/20 blur-3xl" />
+      <div aria-hidden className="pointer-events-none absolute -top-28 left-1/2 h-72 w-full max-w-[42rem] -translate-x-1/2 rounded-full bg-brand-500/20 blur-3xl" />
       <div className="relative w-full max-w-sm">
         <div className="mb-6 flex flex-col items-center gap-3 text-center">
           <Logo size={72} />
@@ -121,7 +121,7 @@ export default function Login() {
           <Btn type="submit" variant="primary" disabled={busy} className="w-full py-2.5">
             {busy ? 'Please wait…' : mode === 'in' ? 'Sign in' : mode === 'up' ? 'Create account' : 'Send reset link'}
           </Btn>
-          <div className="flex items-center justify-between text-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
             <button
               type="button"
               onClick={() => {

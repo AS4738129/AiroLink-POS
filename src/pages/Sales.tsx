@@ -109,8 +109,8 @@ export default function Sales() {
         <div>
           <ReceiptDialog saleId={open.id} onClose={() => setOpen(null)} />
           {canVoid && open.status === 'completed' && (
-            <div className="no-print fixed bottom-4 left-1/2 z-20 -translate-x-1/2">
-              <Card className="flex items-center gap-2 px-3 py-2 shadow-lg">
+            <div className="no-print fixed bottom-4 left-1/2 z-20 w-full max-w-[calc(100vw-2rem)] -translate-x-1/2 sm:w-auto">
+              <Card className="flex flex-wrap items-center justify-center gap-2 px-3 py-2 shadow-lg">
                 <span className="hidden text-xs text-slate-500 sm:block">Void restores stock; cash refunds are manual.</span>
                 <Btn
                   variant="danger"

@@ -36,6 +36,23 @@ it('cost/profit visibility excludes cashiers and inventory officers', () => {
   for (const r of ['super_admin', 'owner', 'manager', 'accountant'] as const) expect(allowed('viewMargin', r)).toBe(true)
   for (const r of ['cashier', 'inventory_officer'] as const) expect(allowed('viewMargin', r)).toBe(false)
 })
+it('expenses and financial reports exclude cashiers and inventory officers; managers cannot delete expenses', () => {
+  for (const r of ['super_admin', 'owner', 'manager', 'accountant'] as const) {
+    expect(allowed('expenses', r)).toBe(true); expect(allowed('editExpenses', r)).toBe(true); expect(allowed('reports', r)).toBe(true)
+  }
+  for (const r of ['cashier', 'inventory_officer'] as const) {
+    expect(allowed('expenses', r)).toBe(false); expect(allowed('editExpenses', r)).toBe(false); expect(allowed('reports', r)).toBe(false)
+  }
+  for (const r of ['super_admin', 'owner', 'accountant'] as const) expect(allowed('deleteExpenses', r)).toBe(true)
+  expect(allowed('deleteExpenses', 'manager')).toBe(false)
+  expect(allowed('deleteExpenses', 'cashier')).toBe(false)
+})
+it('data management shell is visible to every role; datasets stay gated inside', () => {
+  for (const r of ['super_admin', 'owner', 'manager', 'cashier', 'inventory_officer', 'accountant'] as const) {
+    expect(allowed('dataManagement', r)).toBe(true)
+  }
+  expect(allowed('dataManagement', undefined)).toBe(false)
+})
 it('only owners/managers/super admins may void; cashiers may not', () => {
   for (const r of ['super_admin', 'owner', 'manager'] as const) expect(allowed('voidSales', r)).toBe(true)
   for (const r of ['cashier', 'accountant', 'inventory_officer'] as const) expect(allowed('voidSales', r)).toBe(false)

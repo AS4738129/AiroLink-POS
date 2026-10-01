@@ -194,7 +194,7 @@ export default function Inventory() {
             <Field label="Note (optional)">
               <input name="note" className={inputCls} />
             </Field>
-            <div className="flex justify-end gap-2">
+            <div className="flex min-w-0 flex-wrap justify-end gap-2">
               <Btn type="button" onClick={() => setAdjusting(null)}><CrudIcon name="close" /> Cancel</Btn>
               <Btn type="submit" variant="primary" disabled={adjust.isPending}>
                 {adjust.isPending ? (<Spinner label="Saving…" />) : (<><CrudIcon name="save" /> Save</>)}
