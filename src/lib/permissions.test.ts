@@ -63,3 +63,15 @@ it('only owners/managers/super admins may void; cashiers may not', () => {
   for (const r of ['super_admin', 'owner', 'manager'] as const) expect(allowed('voidSales', r)).toBe(true)
   for (const r of ['cashier', 'accountant', 'inventory_officer'] as const) expect(allowed('voidSales', r)).toBe(false)
 })
+it('branches are viewable by every role; only owner/super_admin edit branch records', () => {
+  for (const r of ['super_admin', 'owner', 'manager', 'cashier', 'inventory_officer', 'accountant'] as const) {
+    expect(allowed('branches', r)).toBe(true)
+  }
+  expect(allowed('branches', undefined)).toBe(false)
+  for (const r of ['super_admin', 'owner'] as const) expect(allowed('editBranches', r)).toBe(true)
+  for (const r of ['manager', 'cashier', 'accountant', 'inventory_officer'] as const) expect(allowed('editBranches', r)).toBe(false)
+})
+it('managers may manage branch assignments; other non-owner roles may not', () => {
+  for (const r of ['super_admin', 'owner', 'manager'] as const) expect(allowed('assignBranches', r)).toBe(true)
+  for (const r of ['cashier', 'accountant', 'inventory_officer'] as const) expect(allowed('assignBranches', r)).toBe(false)
+})

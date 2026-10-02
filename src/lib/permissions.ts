@@ -27,6 +27,14 @@ export const access = {
   deleteExpenses: ['super_admin', 'owner', 'accountant'],
   reports: ['super_admin', 'owner', 'manager', 'accountant'],
   adjustInventory: ['super_admin', 'owner', 'manager', 'inventory_officer'],
+  // Phase 6B — Branch Management shell. Every member may view the branches they
+  // can access (branch_sel/branch_visible enforces it); only owner/super_admin
+  // may create, edit, activate/deactivate or change the main branch
+  // (branch_ins/branch_upd enforce it). Managers may manage staff assignments
+  // because the branch_members policy permits owner/manager/super_admin.
+  branches: ['super_admin', 'owner', 'manager', 'cashier', 'inventory_officer', 'accountant'],
+  editBranches: ['super_admin', 'owner'],
+  assignBranches: ['super_admin', 'owner', 'manager'],
   // Phase 5D — Data Management page shell. Every role sees the page, but each
   // dataset section inside is gated by its own view/edit key above, so a
   // cashier sees only customer/sales exports+customer import while an

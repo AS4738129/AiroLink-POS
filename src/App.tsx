@@ -16,6 +16,7 @@ import Purchases from './pages/Purchases'
 import Expenses from './pages/Expenses'
 import Reports from './pages/Reports'
 import DataManagement from './pages/DataManagement'
+import Branches from './pages/Branches'
 import Settings from './pages/Settings'
 import { ContextCacheSync } from './components/ContextCacheSync'
 import { BrandMark, Btn, Field, Notice, Spinner, inputCls } from './components/ui'
@@ -34,7 +35,7 @@ export default function App() {
 }
 
 // Lightweight inline SVG icons (decorative; adjacent text is the label). No icon dependency.
-type NavIconName = 'dashboard' | 'pos' | 'products' | 'inventory' | 'sales' | 'customers' | 'suppliers' | 'purchases' | 'expenses' | 'reports' | 'data' | 'settings'
+type NavIconName = 'dashboard' | 'pos' | 'products' | 'inventory' | 'sales' | 'customers' | 'suppliers' | 'purchases' | 'expenses' | 'reports' | 'data' | 'branches' | 'settings'
 function NavIcon({ name, className = 'size-5 shrink-0' }: { name: NavIconName; className?: string }) {
   const common: SVGProps<SVGSVGElement> = { 'aria-hidden': true, fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round', viewBox: '0 0 24 24', className }
   switch (name) {
@@ -60,6 +61,8 @@ function NavIcon({ name, className = 'size-5 shrink-0' }: { name: NavIconName; c
       return (<svg {...common}><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" /></svg>)
     case 'data':
       return (<svg {...common}><path d="M12 3c2.8 0 5 1.1 5 2.5S14.8 8 12 8 7 6.9 7 5.5 9.2 3 12 3z" /><path d="M7 5.5v6C7 12.9 9.2 14 12 14s5-1.1 5-2.5v-6" /><path d="M7 11.5v6c0 1.4 2.2 2.5 5 2.5s5-1.1 5-2.5v-6" /></svg>)
+    case 'branches':
+      return (<svg {...common}><path d="M12 3l9 5-9 5-9-5 9-5z" /><path d="M3 13l9 5 9-5" /><path d="M12 13v8" /></svg>)
     case 'settings':
       return (<svg {...common}><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.9 2.9l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.9-2.9l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.9-2.9l.1.1a1.7 1.7 0 0 0 1.9.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5h.1a1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.9 2.9l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></svg>)
     default:
@@ -79,6 +82,7 @@ const NAV: { to: string; label: string; feature: string; icon: NavIconName }[] =
   { to: '/expenses', label: 'Expenses', feature: 'expenses', icon: 'expenses' },
   { to: '/reports', label: 'Reports', feature: 'reports', icon: 'reports' },
   { to: '/data', label: 'Data', feature: 'dataManagement', icon: 'data' },
+  { to: '/branches', label: 'Branches', feature: 'branches', icon: 'branches' },
   { to: '/settings', label: 'Settings', feature: 'settings', icon: 'settings' },
 ]
 
@@ -659,6 +663,7 @@ function AppShell() {
               {/* Data import/export shells the per-dataset permission gates inside;
                   the page itself is visible to every role (see dataManagement). */}
               <Route path="/data" element={<DataManagement />} />
+              <Route path="/branches" element={<Branches />} />
               {/* Business settings: viewable by every role, editing is gated
                   inside the page to owner/super_admin (mirrors org_upd). */}
               <Route path="/settings" element={<Settings />} />
