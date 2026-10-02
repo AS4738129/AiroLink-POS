@@ -35,6 +35,11 @@ export const access = {
   branches: ['super_admin', 'owner', 'manager', 'cashier', 'inventory_officer', 'accountant'],
   editBranches: ['super_admin', 'owner'],
   assignBranches: ['super_admin', 'owner', 'manager'],
+  // Phase 6C-1 — Users read-only roster shell. Every member may view the staff
+  // of their own organization (mem_sel/prof_sel/branch_mem_sel enforce it).
+  // There is no edit key: the page issues no writes (no invite, role change
+  // or removal), so nothing here can widen access beyond the RLS boundary.
+  users: ['super_admin', 'owner', 'manager', 'cashier', 'inventory_officer', 'accountant'],
   // Phase 5D — Data Management page shell. Every role sees the page, but each
   // dataset section inside is gated by its own view/edit key above, so a
   // cashier sees only customer/sales exports+customer import while an
